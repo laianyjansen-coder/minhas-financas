@@ -307,7 +307,7 @@ class Component extends DCLogic {
       showFi: false, fi: fiVazio(), iBusca: '', iCat: 'Todas', iMarca: 'Todas', iStatus: 'Todos', iTipo: 'Todos', iVal: 'todos',
       notif: '', tick: 0, showBackup: false, importTxt: '', importMsg: '', backupMsg: '',
       menu: telaEstreita() ? 'fechado' : lerPref('fin-menu', 'aberto'), tema: temaInicial(),
-      colAbertas: {}, invAbertas: {}, tiposAbertos: {}, acAbertos: {}, acabando: '', ia: iaVazio()
+      colAbertas: {}, invAbertas: {}, tiposAbertos: {}, acAbertos: {}, acabando: '', acabarSemData: false, ia: iaVazio()
     };
   })();
 
@@ -362,14 +362,14 @@ class Component extends DCLogic {
   alternarMenu() { var m = this.state.menu === 'aberto' ? 'fechado' : 'aberto'; if (!telaEstreita()) gravarPref('fin-menu', m); this.setState({ menu: m }); }
 
   // ---------- acabados ----------
-  acabar(id, todas) {
+  acabar(id, todas, semData) {
     var self = this;
     this.upd(function (d) {
       var z = d.inventario.find(function (q) { return q.id === id; }); if (!z) return;
       var tem = Math.max(1, parseInt(z.quantidade, 10) || 1), n = todas ? tem : 1;
       d.acabados = d.acabados || [];
       var snap = clone(z); snap.quantidade = n;
-      d.acabados.push({ id: uid(), invId: z.id, nome: z.nome, marca: z.marca || '', categoria: z.categoria, tipo: z.tipo || '', unidades: n, data: hoje(), item: snap });
+      d.acabados.push({ id: uid(), invId: z.id, nome: z.nome, marca: z.marca || '', categoria: z.categoria, tipo: z.tipo || '', unidades: n, data: semData ? '' : hoje(), item: snap });
       if (tem - n >= 1) z.quantidade = tem - n;
       else d.inventario = d.inventario.filter(function (q) { return q.id !== id; });
     });
@@ -1015,10 +1015,11 @@ class Component extends DCLogic {
         grupo: pr.categoria + (pr.tipo ? ' · ' + pr.tipo : ''), tipoG: pr.tipo || 'Sem tipo', vermelho: x.vi.k === 'vermelho', nome: pr.nome,
         final: false, op: '1', ckAria: 'Acabou: ' + pr.nome,
         unTxt: un + (un === 1 ? ' un.' : ' un.'), marcando: s.acabando === pr.id, variasUn: un > 1,
-        pergunta: un > 1 ? 'Você tem ' + un + ' unidades. O que acabou?' : 'Marcar “' + pr.nome + '” como acabado em ' + dataBR(H) + '?',
+        pergunta: un > 1 ? 'Você tem ' + un + ' unidades. O que acabou?' : (s.acabarSemData ? 'Marcar “' + pr.nome + '” como acabado, sem data?' : 'Marcar “' + pr.nome + '” como acabado em ' + dataBR(H) + '?'),
         acabou1Txt: un > 1 ? 'Acabou 1 unidade' : 'Sim, acabou', acabouTodasTxt: 'Acabaram as ' + un,
-        acabou1: function () { self.acabar(pr.id, false); }, acabouTodas: function () { self.acabar(pr.id, true); }, cancelarAcabar: function () { self.setState({ acabando: '' }); },
-        toggle: function (e) { self.setState({ acabando: e.target.checked ? pr.id : '' }); }, categoria: pr.categoria, status: pr.status, temStatus: !!pr.status, detalhe: det.join(' · '), temObs: !!pr.obs, obs: pr.obs,
+        acabou1: function () { self.acabar(pr.id, false, self.state.acabarSemData); }, acabouTodas: function () { self.acabar(pr.id, true, self.state.acabarSemData); }, cancelarAcabar: function () { self.setState({ acabando: '' }); },
+        semData: !!s.acabarSemData, onSemData: function (e) { self.setState({ acabarSemData: e.target.checked }); },
+        toggle: function (e) { self.setState({ acabando: e.target.checked ? pr.id : '', acabarSemData: false }); }, categoria: pr.categoria, status: pr.status, temStatus: !!pr.status, detalhe: det.join(' · '), temObs: !!pr.obs, obs: pr.obs,
         alerta: x.vi.txt, aBg: x.vi.bg, aFg: x.vi.fg, dot: x.vi.dot,
         edit: function () { self.setState({ showFi: true, erro: '', fi: { editId: pr.id, validadeOrig: pr.validade || '', validadeTxt: pr.validadeTxt || '', tipo: pr.tipo || '', nome: pr.nome, categoria: pr.categoria, marca: pr.marca || '', aquisicao: pr.aquisicao || '', validade: pr.validade || '', quantidade: String(pr.quantidade == null ? 1 : pr.quantidade), valor: pr.valor ? String(pr.valor).replace('.', ',') : '', status: pr.status || '', obs: pr.obs || '' } }); },
         del: self.confirmar(key, function () { self.upd(function (y) { y.inventario = y.inventario.filter(function (z) { return z.id !== pr.id; }); }); }),
@@ -1061,7 +1062,8 @@ class Component extends DCLogic {
     // ----- acabados -----
     var acab = (d.acabados || []).slice().sort(function (a, b) { return String(b.data).localeCompare(String(a.data)); });
     var acPorMes = {}, acMeses = [];
-    acab.forEach(function (a) { var k = String(a.data || H).slice(0, 7); if (!acPorMes[k]) { acPorMes[k] = []; acMeses.push(k); } acPorMes[k].push(a); });
+    var acSem = [];
+    acab.forEach(function (a) { if (!a.data) { acSem.push(a); return; } var k = String(a.data).slice(0, 7); if (!acPorMes[k]) { acPorMes[k] = []; acMeses.push(k); } acPorMes[k].push(a); });
     acMeses.sort().reverse();
     var unMes = function (k) { return (acPorMes[k] || []).reduce(function (t, a) { return t + (+a.unidades || 1); }, 0); };
     var acTotalUn = acab.reduce(function (t, a) { return t + (+a.unidades || 1); }, 0);
@@ -1069,13 +1071,20 @@ class Component extends DCLogic {
       var ab = s.acAbertos[k] != null ? s.acAbertos[k] : idx === 0, u = unMes(k);
       return { titulo: mesNome(k), qtdTxt: u + (u === 1 ? ' produto' : ' produtos'), aberto: ab, ariaExp: ab ? 'true' : 'false', rot: ab ? '90deg' : '0deg',
         toggle: function () { var o = Object.assign({}, self.state.acAbertos); o[k] = !ab; self.setState({ acAbertos: o }); },
-        itens: acPorMes[k].map(function (a) {
+        itens: acPorMes[k].map(acItem) };
+    });
+    function acItem(a) {
           var key = 'a:' + a.id, det = [a.categoria + (a.tipo ? ' · ' + a.tipo : '')]; if (a.marca) det.unshift(a.marca);
-          return { nome: a.nome, unTxt: (+a.unidades || 1) + ' un.', detalhe: det.join(' · '), dataTxt: dataBR(a.data),
+          return { nome: a.nome, unTxt: (+a.unidades || 1) + ' un.', detalhe: det.join(' · '), dataTxt: dataBR(a.data), temData: !!a.data, semData: !a.data,
+            onData: function (e) { var v = e.target.value; if (!v) return; self.upd(function (x) { var y = (x.acabados || []).find(function (z) { return z.id === a.id; }); if (y) y.data = v; }); },
             desfazer: function () { self.devolver(a.id); },
             del: self.confirmar(key, function () { self.upd(function (x) { x.acabados = (x.acabados || []).filter(function (y) { return y.id !== a.id; }); }); }), delTxt: self.delTxt(key) };
-        }) };
-    });
+    }
+    if (acSem.length) {
+      var abS = s.acAbertos.__sem != null ? s.acAbertos.__sem : !acMeses.length, uS = acSem.reduce(function (t, a) { return t + (+a.unidades || 1); }, 0);
+      acGrupos.unshift({ titulo: 'ACABADOS', qtdTxt: uS + (uS === 1 ? ' produto' : ' produtos') + ' · sem data', aberto: abS, ariaExp: abS ? 'true' : 'false', rot: abS ? '90deg' : '0deg',
+        toggle: function () { var o = Object.assign({}, self.state.acAbertos); o.__sem = !abS; self.setState({ acAbertos: o }); }, itens: acSem.map(acItem) });
+    }
     var gl = acMeses.length ? acMeses[acMeses.length - 1] : mesAtual, gIni = addMes(mesAtual, -11); if (gl > gIni) gIni = gl; if (diffMeses(gIni, mesAtual) < 5) gIni = addMes(mesAtual, -5);
     var acGL = []; for (var gk = gIni; gk <= mesAtual; gk = addMes(gk, 1)) acGL.push(gk);
     var acMx = Math.max.apply(null, acGL.map(unMes).concat([1]));
@@ -1093,9 +1102,9 @@ class Component extends DCLogic {
       onMetaMensal: function (e) { var t = String(e.target.value).trim(), v = num(t); self.upd(function (x) { if (!t || !(v > 0)) delete x.settings.metaMensal; else x.settings.metaMensal = r2(v); }); },
       cronLibera: brl(cronLibera),
       wSaldoTxt: brl(wSaldo), wSaldoMes: mesNome(mesAtual), wSaldoCor: wSaldo < 0 ? '#8C3B2E' : '#24533F', wSaldoBg: wSaldo < 0 ? '#F8ECE8' : '#E8F1EA',
-      acGrupos: acGrupos, acVazio: acab.length === 0, acTemGraf: acab.length > 0, acGraf: acGraf, acTotal: String(acTotalUn),
+      acGrupos: acGrupos, acVazio: acab.length === 0, acTemGraf: acMeses.length > 0, acGraf: acGraf, acTotal: String(acTotalUn),
       acMesAtual: String(unMes(mesAtual)), acMesNome: mesNome(mesAtual), acMesPassado: String(unMes(addMes(mesAtual, -1))),
-      acMedia: acMeses.length ? (Math.round(acTotalUn / acMeses.length * 10) / 10).toLocaleString('pt-BR') : '0',
+      acMedia: acMeses.length ? (Math.round((acTotalUn - acSem.reduce(function (t, a) { return t + (+a.unidades || 1); }, 0)) / acMeses.length * 10) / 10).toLocaleString('pt-BR') : '0',
       iaAberto: !!s.ia.modo, iaModoGastos: s.ia.modo === 'gastos', iaModoInv: s.ia.modo === 'inv',
       iaTitulo: s.ia.modo === 'inv' ? 'Adicionar produtos por voz' : 'Lançar gastos por voz, PDF ou print',
       iaDica: s.ia.modo === 'inv' ? 'Toque em Gravar e diga os produtos, por exemplo: “comprei dois shampoos Lola de cachos, validade dezembro de 2027”. Toque de novo para parar. A IA monta a lista e você confere antes de salvar.'
