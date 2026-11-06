@@ -68,7 +68,7 @@ function chamarGemini(chave, parts, schema) {
         }
         var msg = (x.j.error && x.j.error.message) || '';
         var e = new Error(msg || ('Erro ' + x.st));
-        if (x.st === 400 && /API key|API_KEY/i.test(msg)) { e.message = 'A chave da IA não é válida. Toque em “Trocar a chave da IA” e cole a chave de novo.'; e.fim = true; }
+        if (x.st === 401 || (x.st === 400 && /API key|API_KEY/i.test(msg))) { e.message = 'A chave da IA não é válida. Toque em “Trocar a chave da IA” e cole a chave de novo.'; e.fim = true; }
         else if (x.st === 403) { e.message = 'A chave da IA não tem permissão. Crie uma chave nova em aistudio.google.com/apikey.'; e.fim = true; }
         else if (x.st === 413) { e.message = 'O arquivo é grande demais para a IA. Envie um PDF ou imagem menor.'; e.fim = true; }
         else if (x.st === 429) e.message = 'Limite gratuito da IA atingido por agora. Espere um minuto e tente de novo.';
@@ -1082,7 +1082,7 @@ class Component extends DCLogic {
       iaPlaceholder: s.ia.modo === 'inv' ? 'Ex.: 1 condicionador Salon Line, validade 03/2027' : 'Ex.: mercado 154,90 no débito hoje',
       iaSemChave: !d.settings.geminiKey || s.ia.trocar, iaTemChave: !!d.settings.geminiKey && !s.ia.trocar,
       iaChaveTxt: s.ia.chave, iaOnChave: function (e) { self.iaSet({ chave: e.target.value }); },
-      iaSalvarChave: function () { var k = String(self.state.ia.chave || '').trim(); if (!/^AIza[\w-]{30,}$/.test(k)) { self.iaSet({ erro: 'Essa chave não parece certa: ela começa com AIza e tem cerca de 39 caracteres.' }); return; } self.upd(function (x) { x.settings.geminiKey = k; }); self.iaSet({ chave: '', trocar: false, erro: '' }); },
+      iaSalvarChave: function () { var k = String(self.state.ia.chave || '').trim(); k = k.replace(/\s+/g, ''); if (!/^(AIza[\w-]{30,}|AQ\.[\w.-]{20,})$/.test(k)) { self.iaSet({ erro: 'Essa chave não parece certa. Copie a chave inteira no Google AI Studio (botão “Copiar chave”): ela começa com AQ. ou AIza.' }); return; } self.upd(function (x) { x.settings.geminiKey = k; }); self.iaSet({ chave: '', trocar: false, erro: '' }); },
       iaTrocarChave: function () { self.iaSet({ trocar: true, chave: '' }); },
       iaGravar: function () { self.iaGravar(); }, iaGravTxt: s.ia.gravando ? 'Parar e enviar' : 'Gravar áudio', iaGravCls: s.ia.gravando ? 'gravando' : '',
       iaArquivo: function (e) { self.iaArquivo(e); },
