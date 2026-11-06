@@ -1,0 +1,77 @@
+name: Gerar app e site
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: gerar-app
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    name: Aplicativo Android (APK)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Localizar a pasta do projeto
+        id: base
+        run: |
+          if [ -d android ]; then echo "dir=." >> "$GITHUB_OUTPUT";
+          else echo "dir=$(dirname "$(find . -maxdepth 3 -type d -name android -not -path './.git/*' | head -n1)")" >> "$GITHUB_OUTPUT"; fi
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Compilar APK
+        working-directory: ${{ steps.base.outputs.dir }}/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - name: Renomear APK
+        run: cp "${{ steps.base.outputs.dir }}/android/app/build/outputs/apk/release/app-release.apk" MinhasFinancas.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MinhasFinancas-apk
+          path: MinhasFinancas.apk
+
+      - name: Publicar nos Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: Minhas Finanças 1.0.${{ github.run_number }}
+          make_latest: true
+          files: MinhasFinancas.apk
+
+  web:
+    name: Versão web (GitHub Pages)
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Localizar a pasta do projeto
+        id: base
+        run: |
+          if [ -d web ]; then echo "dir=." >> "$GITHUB_OUTPUT";
+          else echo "dir=$(dirname "$(find . -maxdepth 3 -type d -name web -not -path './.git/*' | head -n1)")" >> "$GITHUB_OUTPUT"; fi
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: ${{ steps.base.outputs.dir }}/web
+      - id: deploy
+        uses: actions/deploy-pages@v4
