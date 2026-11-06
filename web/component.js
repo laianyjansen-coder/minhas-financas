@@ -229,11 +229,11 @@ function parcelasVirtuais(d) {
     var k = chaveParc(g), a = +g.parcelaAtual || 1; tem[k + '@' + g.mes] = true;
     var u = ult[k]; if (!u || a > (+u.parcelaAtual || 1) || (a === (+u.parcelaAtual || 1) && g.mes > u.mes)) ult[k] = g;
   });
-  var porMes = {};
+  var porMes = {}, pul = d.pulos || {}, cor = d.cortes || {};
   Object.keys(ult).forEach(function (k) {
     var g = ult[k], p = +g.parcelas, a = +g.parcelaAtual || 1;
     for (var i = 1; i <= p - a; i++) {
-      var m = addMes(g.mes, i); if (tem[k + '@' + m]) continue;
+      var m = addMes(g.mes, i); if (tem[k + '@' + m] || pul[k + '@' + m] || (cor[k] && m >= cor[k] && g.mes < cor[k])) continue;
       (porMes[m] = porMes[m] || []).push(Object.assign({}, g, { id: 'v_' + g.id + '_' + i, mes: m, parcelaAtual: a + i, virtual: true, previsto: true, vencimento: g.vencimento ? addMesData2(g.vencimento, i) : '', obs: '' }));
     }
   });
@@ -247,7 +247,7 @@ function recorrentesVirtuais(d, mes) {
   d.gastos.forEach(function (g) { if ((+g.parcelas || 1) > 1) return; var k = chaveRec(g); tem[k + '@' + g.mes] = true; if (!ult[k] || g.mes > ult[k].mes) ult[k] = g; });
   var out = [];
   Object.keys(ult).forEach(function (k) {
-    var g = ult[k]; if (!g.recorrente || g.mes >= mes || tem[k + '@' + mes]) return;
+    var g = ult[k], pul = d.pulos || {}, cor = d.cortes || {}; if (!g.recorrente || g.mes >= mes || tem[k + '@' + mes] || pul[k + '@' + mes] || (cor[k] && mes >= cor[k] && g.mes < cor[k])) return;
     var n = diffMeses(g.mes, mes);
     out.push(Object.assign({}, g, { id: 'r_' + g.id + '_' + mes, mes: mes, virtual: true, previsto: true, data: '', vencimento: g.vencimento ? addMesData2(g.vencimento, n) : '', obs: '' }));
   });
@@ -525,6 +525,21 @@ class Component extends DCLogic {
   editarGasto(g) {
     this.setState({ showFg: true, erro: '', fg: { editId: g.id, data: g.data || '', descricao: g.descricao, categoria: g.categoria, valor: String(g.valor).replace('.', ','), coluna: g.coluna, forma: g.forma || '', cartao: g.cartao || '', parcelas: String(g.parcelas || 1), parcelaAtual: String(g.parcelaAtual || 1), vencimento: g.vencimento || '', obs: g.obs || '', recorrente: !!g.recorrente, pago: !!g.pago, pagoEm: g.pagoEm || '' } });
   }
+  excluirGasto(g, modo) {
+    var parc = (+g.parcelas || 1) > 1, k = parc ? chaveParc(g) : chaveRec(g);
+    var chaveDe = function (y) { return (+y.parcelas || 1) > 1 ? 'p' + chaveParc(y) : 'r' + chaveRec(y); }, alvo = (parc ? 'p' : 'r') + k;
+    this.upd(function (x) {
+      x.pulos = x.pulos || {}; x.cortes = x.cortes || {};
+      if (modo === 'serie') {
+        x.cortes[k] = g.mes;
+        x.gastos = x.gastos.filter(function (y) { return y.mes < g.mes || chaveDe(y) !== alvo; });
+      } else {
+        if (!g.virtual) x.gastos = x.gastos.filter(function (y) { return y.id !== g.id; });
+        if (modo === 'mes') x.pulos[k + '@' + g.mes] = true;
+      }
+    });
+    this.setState({ conf: '' });
+  }
   addCat() {
     var n = String(this.state.novaCat).trim(); if (!n) return;
     if (this.state.d.categorias.indexOf(n) < 0) this.upd(function (d) { d.categorias.push(n); });
@@ -691,7 +706,8 @@ class Component extends DCLogic {
         if (!q) return true;
         return [g.descricao, g.categoria, g.cartao, g.obs, g.forma].join(' ').toLowerCase().indexOf(q) >= 0;
       }).sort(ord).map(function (g) {
-        var key = 'g:' + g.id;
+        var key = 'g:' + g.id, ehParc = (+g.parcelas || 1) > 1;
+        var serie = ehParc || !!g.virtual || !!g.recorrente || d.gastos.some(function (y) { return (+y.parcelas || 1) <= 1 && y.recorrente && y.mes < g.mes && chaveRec(y) === chaveRec(g); });
         var ult = (+g.parcelas || 1) > 1 && (+g.parcelaAtual || 1) >= (+g.parcelas || 1);
         var det = [];
         if (g.data) det.push(dataBR(g.data));
@@ -708,8 +724,13 @@ class Component extends DCLogic {
           togglePago: function (e) { self.marcarPago([g], e.target.checked); },
           temObs: !!g.obs, obs: g.obs,
           edit: function () { self.editarGasto(g); },
-          del: self.confirmar(key, function () { self.upd(function (x) { x.gastos = x.gastos.filter(function (y) { return y.id !== g.id; }); }); }),
-          delTxt: self.delTxt(key)
+          del: serie ? function () { self.setState({ conf: self.state.conf === key ? '' : key }); } : self.confirmar(key, function () { self.excluirGasto(g, 'unico'); }),
+          delTxt: serie ? 'Excluir' : self.delTxt(key),
+          perguntando: serie && s.conf === key,
+          pergunta: ehParc ? 'Excluir a compra parcelada “' + g.descricao + '”:' : 'Excluir o gasto recorrente “' + g.descricao + '”:',
+          delMes: function () { self.excluirGasto(g, 'mes'); }, delMesTxt: 'Só ' + mesNome(g.mes),
+          delSerie: function () { self.excluirGasto(g, 'serie'); }, delSerieTxt: ehParc ? 'Esta e as próximas parcelas' : 'Este e os próximos meses',
+          cancelarDel: function () { self.setState({ conf: '' }); }
         };
       });
       var todos = doMes.filter(function (g) { return g.coluna === c.id; });
