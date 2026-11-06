@@ -1,0 +1,55 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'br.com.minhasfinancas'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'br.com.minhasfinancas'
+        minSdk 26
+        targetSdk 34
+        // O número da versão sobe sozinho a cada build feito pelo GitHub (permite atualizar o app sem desinstalar).
+        versionCode Integer.parseInt(System.getenv('GITHUB_RUN_NUMBER') ?: '1')
+        versionName '1.0.' + (System.getenv('GITHUB_RUN_NUMBER') ?: '0')
+    }
+
+    signingConfigs {
+        // Chave própria do app, guardada no projeto, para que todas as versões
+        // geradas possam ser instaladas por cima da anterior sem perder dados.
+        app {
+            storeFile file('minhasfinancas.keystore')
+            storePassword 'minhasfinancas'
+            keyAlias 'minhasfinancas'
+            keyPassword 'minhasfinancas'
+        }
+    }
+
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.app
+        }
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.app
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+// Copia a versão web (pasta ../../web) para dentro do app antes de compilar:
+// o celular e o site usam exatamente os mesmos arquivos.
+tasks.register('copiarWeb', Copy) {
+    from "${rootDir}/../web"
+    into "${projectDir}/src/main/assets/www"
+}
+preBuild.dependsOn copiarWeb
+
+dependencies {
+    implementation 'androidx.webkit:webkit:1.11.0'
+}

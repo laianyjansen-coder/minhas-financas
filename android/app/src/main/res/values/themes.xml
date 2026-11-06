@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="fundo_icone">#DFE6DC</color>
+    <color name="fundo">#F2EDE4</color>
+
+    <style name="Tema.MinhasFinancas" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">#DFE6DC</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:navigationBarColor">#F2EDE4</item>
+        <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:windowBackground">@color/fundo</item>
+        <item name="android:colorAccent">#4F6653</item>
+    </style>
+</resources>
