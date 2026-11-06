@@ -15,7 +15,7 @@ public class Ponte {
         this.atividade = atividade;
     }
 
-    /** Agenda o lembrete diário no horário "HH:MM" escolhido no Rastreador de hábitos. */
+    /** Agenda o lembrete diário no horário "HH:MM" escolhido no Rastreador de Gastos. */
     @JavascriptInterface
     public void agendarLembrete(String hora) {
         Lembretes.salvarHora(atividade, hora);
@@ -35,6 +35,13 @@ public class Ponte {
                 && atividade.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             atividade.runOnUiThread(() -> atividade.requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 10));
         }
+    }
+
+    /** Tema escolhido no app ("claro" ou "escuro"): ajusta a cor das barras do Android. */
+    @JavascriptInterface
+    public void definirTema(String tema) {
+        final boolean escuro = "escuro".equals(tema);
+        if (atividade instanceof MainActivity) atividade.runOnUiThread(() -> ((MainActivity) atividade).aplicarTema(escuro));
     }
 
     @JavascriptInterface

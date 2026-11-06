@@ -59,6 +59,16 @@ Os dados atuais estão na dashboard do Claude. Para trazê-los:
 - O botão **Sincronização** (canto inferior direito) mostra o estado: verde = sincronizado, amarelo = aguardando envio ou sem internet, vermelho = erro.
 - Se dois aparelhos alterarem os dados ao mesmo tempo, vale a última versão salva. Antes de substituir os dados de um aparelho, o app guarda uma cópia de segurança local.
 
+## Lançar por voz, PDF ou print (IA do Google)
+
+Os botões **Voz, PDF ou print** (aba Gastos) e **Adicionar por voz** (aba Inventário) usam o Gemini, a IA do Google.
+
+1. Abra **aistudio.google.com/apikey** e entre com sua conta Google.
+2. Clique em **Create API key** (Criar chave de API) e copie a chave (começa com `AIza`).
+3. No app, toque em um desses botões, cole a chave e toque em **Salvar chave**. Basta fazer uma vez: a chave fica na sua conta e vale no celular e no site.
+
+O uso pessoal cabe no plano gratuito. A IA só monta a lista: você confere, corrige e escolhe o que salvar.
+
 ## Atualizar o app
 
 Quando a dashboard mudar, peça ao Claude para gerar os arquivos novos e substitua no GitHub os arquivos `web/template.js` e `web/component.js` (ou rode `python3 tools/gerar_web.py Main.dc.html`). O GitHub gera um APK novo; instale por cima do anterior, sem perder dados.

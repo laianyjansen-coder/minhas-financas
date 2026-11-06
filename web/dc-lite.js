@@ -94,11 +94,48 @@
       if (name.indexOf('hint-') === 0) continue;
       var val = evalVal(node.attrs[a][1], scopes);
       if (/^on[A-Z]/.test(name)) { if (typeof val === 'function') v.on[eventName(name, node)] = val; }
-      else v.a[name] = val;
+      else v.a[name] = COR_ATTR[name] ? cores(val) : val;
     }
     for (var k = 0; k < node.kids.length; k++) build(node.kids[k], scopes, v.kids);
     out.push(v);
   }
+
+  // ---------- tema escuro: converte as cores claras da dashboard ----------
+  var tema = 'claro', cacheCor = {}, estilosHelmet = [];
+  function hexParaHsl(hex) {
+    if (hex.length === 4) hex = '#' + hex[1] + hex[1] + hex[2] + hex[2] + hex[3] + hex[3];
+    var r = parseInt(hex.slice(1, 3), 16) / 255, g = parseInt(hex.slice(3, 5), 16) / 255, b = parseInt(hex.slice(5, 7), 16) / 255;
+    var mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2, h = 0, s = 0;
+    if (mx !== mn) {
+      var dd = mx - mn; s = l > 0.5 ? dd / (2 - mx - mn) : dd / (mx + mn);
+      h = mx === r ? (g - b) / dd + (g < b ? 6 : 0) : mx === g ? (b - r) / dd + 2 : (r - g) / dd + 4; h /= 6;
+    }
+    return [h, s, l];
+  }
+  function hslParaHex(h, s, l) {
+    function f(n) { var k = (n + h * 12) % 12, a = s * Math.min(l, 1 - l); var c = l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)); return ('0' + Math.round(c * 255).toString(16)).slice(-2); }
+    return '#' + f(0) + f(8) + f(4);
+  }
+  var FIXOS = { '#1f4d3a': '#1F4D3A', '#173b2d': '#173B2D', '#fffffe': '#FFFFFE' };
+  function corEscura(hex) {
+    var k = hex.toLowerCase(); if (cacheCor[k]) return cacheCor[k];
+    if (FIXOS[k]) return FIXOS[k]; // verdes de destaque e branco sobre verde ficam iguais no escuro
+    var hsl = hexParaHsl(k), l = hsl[2], s = hsl[1], nl;
+    if (l >= 0.8) nl = l >= 0.93 ? 0.095 + (l - 0.93) * 1.15 : 0.095 + (0.93 - l) * 3.4; // fundos claros -> fundos escuros (cartões e trilhas mais claros que o fundo)
+    else if (l <= 0.32) nl = 0.93 - l * 0.45;          // textos escuros -> textos claros
+    else nl = 1.02 - l;                                // tons médios: espelha
+    if (l >= 0.8) s = Math.min(s, 0.16);
+    return (cacheCor[k] = hslParaHex(hsl[0], s, Math.max(0, Math.min(1, nl))));
+  }
+  var HEX = /#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{3})(?![0-9a-fA-F])/g;
+  function cores(str) { return tema === 'escuro' && typeof str === 'string' && str.indexOf('#') >= 0 ? str.replace(HEX, corEscura) : str; }
+  var COR_ATTR = { style: 1, fill: 1, stroke: 1, 'stop-color': 1, color: 1 };
+  function aplicarTemaHelmet() {
+    estilosHelmet.forEach(function (st) { st.el.textContent = cores(st.css); });
+    document.documentElement.style.colorScheme = tema === 'escuro' ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-tema', tema);
+  }
+  function setTema(t) { tema = t === 'escuro' ? 'escuro' : 'claro'; aplicarTemaHelmet(); schedule(); }
 
   // ---------- aplicação no DOM ----------
   function dispatch(e) { var h = this.__on && this.__on[e.type]; if (h) h(e); }
@@ -182,7 +219,12 @@
   }
   function mount(el, templateSrc, Comp) {
     var helmet = extract(templateSrc, 'helmet');
-    if (helmet) { var hd = document.createElement('div'); hd.innerHTML = helmet; while (hd.firstChild) document.head.appendChild(hd.firstChild); }
+    if (helmet) {
+      var hd = document.createElement('div'); hd.innerHTML = helmet;
+      Array.prototype.forEach.call(hd.querySelectorAll('style'), function (st) { estilosHelmet.push({ el: st, css: st.textContent }); });
+      while (hd.firstChild) document.head.appendChild(hd.firstChild);
+      aplicarTemaHelmet();
+    }
     var body = templateSrc.replace(/<helmet>[\s\S]*?<\/helmet>/, '');
     var inst = new Comp({});
     mounted = { el: el, tree: parse(body), inst: inst };
@@ -193,5 +235,5 @@
   }
 
   window.DCLogic = DCLogic;
-  window.DCLite = { mount: mount, render: schedule, parse: parse };
+  window.DCLite = { mount: mount, render: schedule, parse: parse, setTema: setTema, tema: function () { return tema; }, cor: function (c) { return cores(c); } };
 })();
