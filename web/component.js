@@ -11,6 +11,8 @@ var MESES = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agos
 var MES_C = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
 var FORMAS = ['Crédito','Débito','Pix','Dinheiro','Boleto','Transferência'];
 var INV_STATUS = ['Fechado','Em uso','Acabando'];
+function unid(pr) { return Math.max(1, parseInt(pr && pr.quantidade, 10) || 1); }
+function somaUn(l, f) { return l.reduce(function (t, x) { return t + unid(f ? f(x) : x); }, 0); }
 function lerPref(k, padrao) { try { var v = window.localStorage.getItem(k); return v == null ? padrao : v; } catch (e) { return padrao; } }
 function gravarPref(k, v) { try { window.localStorage.setItem(k, v); } catch (e) {} }
 function telaEstreita() { try { return window.innerWidth <= 720; } catch (e) { return false; } }
@@ -1014,7 +1016,7 @@ class Component extends DCLogic {
       return {
         grupo: pr.categoria + (pr.tipo ? ' · ' + pr.tipo : ''), tipoG: pr.tipo || 'Sem tipo', vermelho: x.vi.k === 'vermelho', nome: pr.nome,
         final: false, op: '1', ckAria: 'Acabou: ' + pr.nome,
-        unTxt: un + (un === 1 ? ' un.' : ' un.'), marcando: s.acabando === pr.id, variasUn: un > 1,
+        un: un, unTxt: un + (un === 1 ? ' un.' : ' un.'), marcando: s.acabando === pr.id, variasUn: un > 1,
         pergunta: un > 1 ? 'Você tem ' + un + ' unidades. O que acabou?' : (s.acabarSemData ? 'Marcar “' + pr.nome + '” como acabado, sem data?' : 'Marcar “' + pr.nome + '” como acabado em ' + dataBR(H) + '?'),
         acabou1Txt: un > 1 ? 'Acabou 1 unidade' : 'Sim, acabou', acabouTodasTxt: 'Acabaram as ' + un,
         acabou1: function () { self.acabar(pr.id, false, self.state.acabarSemData); }, acabouTodas: function () { self.acabar(pr.id, true, self.state.acabarSemData); }, cancelarAcabar: function () { self.setState({ acabando: '' }); },
@@ -1040,24 +1042,25 @@ class Component extends DCLogic {
       its.forEach(function (it) { var t = it.tipoG; if (!gm[t]) { gm[t] = []; go.push(t); } gm[t].push(it); });
       go.sort(function (a, b) { return (a === 'Sem tipo') - (b === 'Sem tipo') || a.localeCompare(b, 'pt-BR'); });
       var todosCat = inv.filter(function (x) { return x.pr.categoria === c; });
-      var verm = todosCat.filter(function (x) { return x.vi.k === 'vermelho'; }).length;
+      var verm = somaUn(todosCat.filter(function (x) { return x.vi.k === 'vermelho'; }), function (x) { return x.pr; });
+      var totCat = somaUn(todosCat, function (x) { return x.pr; }), unVis = its.reduce(function (t, it) { return t + it.un; }, 0);
       var aberto = filtroAtivo || !!s.invAbertas[c], n = its.length;
       return { nome: c, aberto: aberto, ariaExp: aberto ? 'true' : 'false', rot: aberto ? '90deg' : '0deg',
-        qtdTxt: (filtroAtivo ? n + ' de ' + todosCat.length : todosCat.length) + (todosCat.length === 1 ? ' produto' : ' produtos'),
+        qtdTxt: (filtroAtivo ? unVis + ' de ' + totCat : totCat) + (totCat === 1 ? ' produto' : ' produtos'),
         temAlerta: verm > 0, alertaTxt: verm + (verm === 1 ? ' vencido/iminente' : ' vencidos/iminentes'),
         addAria: 'Adicionar produto em ' + c, adicionar: function () { self.novoProdutoEm(c, ''); },
         vazio: todosCat.length === 0, mostrar: n > 0 || (!filtroAtivo && todosCat.length === 0),
         toggle: function () { var o = Object.assign({}, self.state.invAbertas); o[c] = !o[c]; self.setState({ invAbertas: o }); },
         grupos: go.map(function (t) {
-          var k = gm[t].length, kk = c + '|' + t, ab = filtroAtivo || !!s.tiposAbertos[kk];
-          var vt = gm[t].filter(function (it) { return it.vermelho; }).length;
+          var k = gm[t].reduce(function (q, it) { return q + it.un; }, 0), kk = c + '|' + t, ab = filtroAtivo || !!s.tiposAbertos[kk];
+          var vt = gm[t].filter(function (it) { return it.vermelho; }).reduce(function (q, it) { return q + it.un; }, 0);
           return { titulo: t, qtdTxt: k + (k === 1 ? ' produto' : ' produtos'), itens: gm[t], aberto: ab, ariaExp: ab ? 'true' : 'false', rot: ab ? '90deg' : '0deg',
             temAlerta: vt > 0, alertaTxt: vt + (vt === 1 ? ' vencido/iminente' : ' vencidos/iminentes'),
             addAria: 'Adicionar produto em ' + c + (t !== 'Sem tipo' ? ' · ' + t : ''), adicionar: function () { self.novoProdutoEm(c, t === 'Sem tipo' ? '' : t); },
             toggle: function () { var o = Object.assign({}, self.state.tiposAbertos); o[kk] = !o[kk]; self.setState({ tiposAbertos: o }); } };
         }) };
     }).filter(function (x) { return x.mostrar; });
-    var cnt = function (k) { return inv.filter(function (x) { return x.vi.k === k; }).length; };
+    var cnt = function (k) { return somaUn(inv.filter(function (x) { return x.vi.k === k; }), function (x) { return x.pr; }); };
 
     // ----- acabados -----
     var acab = (d.acabados || []).slice().sort(function (a, b) { return String(b.data).localeCompare(String(a.data)); });
@@ -1217,7 +1220,7 @@ class Component extends DCLogic {
       showCompra: !!s.cp, cp: s.cp || { valor: '', data: '', coluna: 'demais', registrar: true }, cpOn: this.binder('cp'), cpNome: s.cp ? s.cp.nome : '',
       confirmarCompra: function () { self.confirmarCompra(); }, cancelarCompra: function () { self.setState({ cp: null }); },
 
-      iQtd: String(d.inventario.length),
+      iQtd: String(somaUn(d.inventario)), iQtdSub: d.inventario.length + (d.inventario.length === 1 ? ' item cadastrado' : ' itens cadastrados') + ' · somando as unidades',
       verFinal: function () { self.setState({ iStatus: self.state.iStatus === 'Finalizado' ? 'Todos' : 'Finalizado' }); }, verFinalTxt: s.iStatus === 'Finalizado' ? 'Mostrar todos' : 'Ver finalizados', iVerde: String(cnt('verde')), iAmarelo: String(cnt('amarelo')), iVermelho: String(cnt('vermelho')),
       showFi: s.showFi, fi: s.fi, fiOn: this.binder('fi'),
       fiTipoOpts: (function () { var l = self.tiposDaCat(s.fi.categoria); if (s.fi.tipo && s.fi.tipo !== '__novo__' && l.indexOf(s.fi.tipo) < 0) l.push(s.fi.tipo); return l.map(function (x) { return { v: x }; }); })(),
