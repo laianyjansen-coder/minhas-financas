@@ -11,6 +11,7 @@ var MESES = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agos
 var MES_C = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
 var FORMAS = ['Crédito','Débito','Pix','Dinheiro','Boleto','Transferência'];
 var INV_STATUS = ['Fechado','Em uso','Acabando'];
+var FORMAS_R = ['Pix', 'Débito', 'Crédito', 'Dinheiro', 'Boleto', 'Outro'];
 function unid(pr) { return Math.max(1, parseInt(pr && pr.quantidade, 10) || 1); }
 function somaUn(l, f) { return l.reduce(function (t, x) { return t + unid(f ? f(x) : x); }, 0); }
 function lerPref(k, padrao) { try { var v = window.localStorage.getItem(k); return v == null ? padrao : v; } catch (e) { return padrao; } }
@@ -337,14 +338,12 @@ class Component extends DCLogic {
       showFi: false, fi: fiVazio(), iBusca: '', iCat: 'Todas', iMarca: 'Todas', iStatus: 'Todos', iTipo: 'Todos', iVal: 'todos',
       notif: '', tick: 0, showBackup: false, importTxt: '', importMsg: '', backupMsg: '',
       menu: telaEstreita() ? 'fechado' : lerPref('fin-menu', 'aberto'), tema: temaInicial(),
-      colAbertas: {}, invAbertas: {}, tiposAbertos: {}, acAbertos: {}, acabando: '', acabarSemData: false, ia: iaVazio()
+      colAbertas: {}, invAbertas: {}, tiposAbertos: {}, acAbertos: {}, acabando: '', acabarSemData: false, metaAbertas: {}, hDesc: '', hForma: 'Pix', cred: null, credFila: [], ia: iaVazio()
     };
   })();
 
   componentDidMount() {
     var self = this;
-    var v = this.state.d.habitos[this.state.hSel];
-    if (v != null) this.setState({ hValor: String(v).replace('.', ',') });
     aplicarTema(this.state.tema);
     this._t = setInterval(function () { self.checarAviso(); self.setState({ tick: Date.now() }); }, 60000);
     this.checarAviso();
@@ -417,7 +416,7 @@ class Component extends DCLogic {
 
   // ---------- IA ----------
   iaSet(o) { this.setState({ ia: Object.assign({}, this.state.ia, o) }); }
-  iaAbrir(modo) { this.setState({ ia: iaVazio(modo, this.state.mes) }); try { window.scrollTo(0, 0); } catch (e) {} }
+  iaAbrir(modo) { var ia = iaVazio(modo, this.state.mes); ia.dia = this.state.hSel; this.setState({ ia: ia }); try { window.scrollTo(0, 0); } catch (e) {} }
   iaFechar() { this.iaPararGravacao(true); this.setState({ ia: iaVazio() }); }
   iaPararGravacao(descartar) { var g = this._grav; if (!g) return; g.descartar = !!descartar; clearTimeout(g.tm); try { g.rec.stop(); } catch (e) {} }
   iaGravar() {
@@ -471,6 +470,25 @@ class Component extends DCLogic {
       schema = { type: 'OBJECT', properties: { mesFatura: { type: 'STRING' }, itens: { type: 'ARRAY', items: { type: 'OBJECT', properties: {
         descricao: { type: 'STRING' }, valor: { type: 'NUMBER' }, data: { type: 'STRING' }, categoria: { type: 'STRING', enum: d.categorias.slice() },
         coluna: { type: 'STRING', enum: ['visa', 'master', 'cartao', 'demais'] }, parcelaAtual: { type: 'INTEGER' }, parcelas: { type: 'INTEGER' } }, required: ['descricao', 'valor'] } } }, required: ['itens'] };
+    } else if (ia.modo === 'wish') {
+      prompt = 'Você cadastra produtos numa lista de desejos (wishlist) de um app brasileiro. Hoje é ' + dataBR(H) + '.\n' +
+        'Leia o conteúdo a seguir (' + oque + ') e liste cada produto que a pessoa quer comprar.\n' +
+        '- nome: nome do produto sem a marca. marca: a marca, se dita.\n' +
+        '- cat: escolha a categoria mais adequada entre: ' + d.wishCats.join(', ') + '.\n' +
+        '- valor: preço em reais com ponto decimal, se dito; senão 0.\n' +
+        '- prioridade: Alta, Média ou Baixa (use Média se não for dita).\n' +
+        '- Não invente nada.';
+      schema = { type: 'OBJECT', properties: { produtos: { type: 'ARRAY', items: { type: 'OBJECT', properties: {
+        nome: { type: 'STRING' }, marca: { type: 'STRING' }, cat: { type: 'STRING', enum: d.wishCats.slice() }, valor: { type: 'NUMBER' }, prioridade: { type: 'STRING', enum: ['Alta', 'Média', 'Baixa'] } }, required: ['nome'] } } }, required: ['produtos'] };
+    } else if (ia.modo === 'rast') {
+      prompt = 'Você registra gastos do dia num rastreador de gastos de um app brasileiro. O dia é ' + dataBR(ia.dia || H) + '.\n' +
+        'Leia o conteúdo a seguir (' + oque + ') e liste cada gasto.\n' +
+        '- valor: em reais com ponto decimal (ex.: 32.5).\n' +
+        '- descricao: o que foi comprado ou pago, curto (ex.: almoço, farmácia, Uber).\n' +
+        '- forma: uma de ' + FORMAS_R.join(', ') + '. "Cartão de crédito" ou "no crédito" = Crédito; "cartão de débito" = Débito; se não for dita, use Pix.\n' +
+        '- Não invente nada.';
+      schema = { type: 'OBJECT', properties: { itens: { type: 'ARRAY', items: { type: 'OBJECT', properties: {
+        valor: { type: 'NUMBER' }, descricao: { type: 'STRING' }, forma: { type: 'STRING', enum: FORMAS_R.slice() } }, required: ['valor'] } } }, required: ['itens'] };
     } else {
       var cats = {}; d.inventario.forEach(function (x) { if (!x.categoria) return; cats[x.categoria] = cats[x.categoria] || {}; if (x.tipo) cats[x.categoria][x.tipo] = 1; });
       Object.keys(d.invTipos || {}).forEach(function (c) { cats[c] = cats[c] || {}; (d.invTipos[c] || []).forEach(function (t) { cats[c][t] = 1; }); });
@@ -502,6 +520,17 @@ class Component extends DCLogic {
             parcelaAtual: String(at), parcelas: String(pa) };
         });
         self.iaSet({ proc: false, itens: itens, mes: mesAlvo, erro: itens.length ? '' : 'A IA não encontrou despesas nesse conteúdo.' });
+      } else if (cur.modo === 'wish') {
+        itens = (r.produtos || []).filter(function (x) { return x && x.nome; }).map(function (x) {
+          return { incluir: true, dup: false, nome: String(x.nome).trim(), marca: String(x.marca || '').trim(), cat: dd.wishCats.indexOf(x.cat) >= 0 ? x.cat : (dd.wishCats[0] || 'Outros'),
+            valor: +x.valor ? String(r2(+x.valor)).replace('.', ',') : '', prioridade: ['Alta', 'Média', 'Baixa'].indexOf(x.prioridade) >= 0 ? x.prioridade : 'Média' };
+        });
+        self.iaSet({ proc: false, itens: itens, erro: itens.length ? '' : 'A IA não encontrou produtos nesse conteúdo.' });
+      } else if (cur.modo === 'rast') {
+        itens = (r.itens || []).filter(function (x) { return x && +x.valor > 0; }).map(function (x) {
+          return { incluir: true, dup: false, valor: String(r2(+x.valor)).replace('.', ','), desc: String(x.descricao || '').trim(), forma: FORMAS_R.indexOf(x.forma) >= 0 ? x.forma : 'Pix' };
+        });
+        self.iaSet({ proc: false, itens: itens, erro: itens.length ? '' : 'A IA não encontrou valores nesse conteúdo.' });
       } else {
         itens = (r.produtos || []).filter(function (x) { return x && x.nome; }).map(function (x) {
           return { incluir: true, dup: false, nome: String(x.nome).trim(), marca: String(x.marca || '').trim(), categoria: String(x.categoria || 'Outros').trim(), tipo: String(x.tipo || '').trim(),
@@ -524,6 +553,16 @@ class Component extends DCLogic {
         });
       });
       this.setState({ ia: iaVazio(), mes: ia.mes, tab: 'gastos', colAbertas: {} });
+    } else if (ia.modo === 'wish') {
+      this.upd(function (d) {
+        sel.forEach(function (x) { d.wishlist.push({ id: uid(), status: 'Desejado', incluido: hoje(), cat: x.cat, nome: String(x.nome).trim(), marca: String(x.marca || '').trim(), validade: '', valor: r2(num(x.valor)), prioridade: x.prioridade, link: '', obs: '' }); });
+      });
+      this.setState({ ia: iaVazio(), tab: 'wishlist', wFiltro: 'Todas' });
+    } else if (ia.modo === 'rast') {
+      var dia = ia.dia || this.state.hSel;
+      var ok2 = sel.filter(function (x) { return num(x.valor) > 0; }).map(function (x) { return { valor: num(x.valor), desc: x.desc, forma: x.forma }; });
+      this.setState({ ia: iaVazio() });
+      if (ok2.length) this.addGastosDia(dia, ok2);
     } else {
       var abrir = Object.assign({}, this.state.invAbertas);
       sel.forEach(function (x) { if (String(x.categoria).trim()) { var c = self.criarCatInv(x.categoria); x.categoria = c; abrir[c] = true; if (x.tipo) self.registrarTipo(c, x.tipo); } });
@@ -536,7 +575,47 @@ class Component extends DCLogic {
       this.setState({ ia: iaVazio(), invAbertas: abrir });
     }
   }
-  selDia(iso) { var v = this.state.d.habitos[iso]; this.setState({ hSel: iso, hValor: v == null ? '' : String(v).replace('.', ',') }); }
+  selDia(iso) { this.setState({ hSel: iso, hValor: '', hDesc: '' }); }
+  // ---------- rastreador: gastos do dia com descrição e forma de pagamento ----------
+  detDia(d, iso) {
+    var l = (d.habDet || {})[iso];
+    if (l && l.length) return l;
+    return d.habitos[iso] != null ? [{ id: 'antigo', valor: +d.habitos[iso] || 0, desc: '', forma: '' }] : [];
+  }
+  addGastosDia(iso, novos) {
+    var self = this;
+    this.upd(function (x) {
+      x.habDet = x.habDet || {};
+      var l = self.detDia(x, iso).map(function (e) { return e.id === 'antigo' ? Object.assign({}, e, { id: uid() }) : e; });
+      novos.forEach(function (n) { l.push({ id: uid(), valor: r2(n.valor), desc: String(n.desc || '').trim(), forma: n.forma || '' }); });
+      x.habDet[iso] = l; x.habitos[iso] = r2(l.reduce(function (a, e) { return a + (+e.valor || 0); }, 0));
+    });
+    var cred = novos.filter(function (n) { return n.forma === 'Crédito'; }).map(function (n) {
+      return { descricao: String(n.desc || '').trim() || 'Compra no crédito', valor: String(r2(n.valor)).replace('.', ','), data: iso, coluna: 'visa',
+        categoria: categorizar({ descricao: n.desc || '', categoria: 'Outros' }), parcelas: '1', mes: addMes(iso.slice(0, 7), 1) };
+    });
+    if (cred.length) this.setState({ cred: cred[0], credFila: cred.slice(1) });
+  }
+  removerGastoDia(iso, id) {
+    var self = this;
+    this.upd(function (x) {
+      x.habDet = x.habDet || {};
+      var l = self.detDia(x, iso).filter(function (e) { return e.id !== id; });
+      if (!l.length) { delete x.habDet[iso]; delete x.habitos[iso]; }
+      else { x.habDet[iso] = l; x.habitos[iso] = r2(l.reduce(function (a, e) { return a + (+e.valor || 0); }, 0)); }
+    });
+  }
+  salvarCred() {
+    var c = this.state.cred; if (!c) return;
+    var v = num(c.valor), pa = Math.max(1, parseInt(c.parcelas, 10) || 1);
+    if (!String(c.descricao).trim() || !v) { this.setState({ cred: Object.assign({}, c, { erro: 'Informe a descrição e o valor.' }) }); return; }
+    this.upd(function (d) {
+      d.gastos.push({ id: uid(), mes: c.mes, data: c.data, descricao: String(c.descricao).trim(), categoria: c.categoria, valor: r2(v / pa), coluna: c.coluna, forma: 'Crédito', cartao: '',
+        parcelas: pa, parcelaAtual: 1, vencimento: '', obs: 'Lançado pelo Rastreador de Gastos', recorrente: false, pago: false, pagoEm: '' });
+    });
+    this.proximoCred();
+  }
+  proximoCred() { var f = this.state.credFila.slice(); this.setState({ cred: f.shift() || null, credFila: f }); }
 
   // ---------- gastos ----------
   salvarGasto() {
@@ -878,7 +957,11 @@ class Component extends DCLogic {
           del: self.confirmar(keyc, function () { self.upd(function (x) { x.metas = x.metas.filter(function (y) { return y.id !== m.id; }); }); }),
           delTxt: self.delTxt(keyc),
           subAberto: s.fs.metaId === m.id,
-          abrirSub: function () { self.setState({ fs: Object.assign(fsVazio(), { metaId: m.id }) }); }
+          abrirSub: function () { self.setState({ fs: Object.assign(fsVazio(), { metaId: m.id }) }); },
+          subsAbertas: !!s.metaAbertas[m.id], ariaSub: s.metaAbertas[m.id] ? 'true' : 'false', rotSub: s.metaAbertas[m.id] ? '90deg' : '0deg',
+          toggleSub: function () { var o = Object.assign({}, self.state.metaAbertas); o[m.id] = !o[m.id]; self.setState({ metaAbertas: o }); },
+          temEtapas: mi.length > 0, etapas: mi.map(function (it) { return { nome: it.texto + (it.feito ? ' (feita)' : ''), cor: it.feito ? '#1F4D3A' : '#E3E5E1' }; }),
+          etapasTxt: mi.length ? mi.filter(function (it) { return it.feito; }).length + ' de ' + mi.length + (mi.length === 1 ? ' tarefa cumprida' : ' tarefas cumpridas') : 'nenhuma tarefa'
         };
       }
       var al = +m.alcancado || 0, ob = +m.objetivo || 0; somaOb += ob; somaAl += Math.min(al, ob); pcts.push(pct(al, ob));
@@ -917,7 +1000,12 @@ class Component extends DCLogic {
         del: self.confirmar(key, function () { self.upd(function (x) { x.metas = x.metas.filter(function (y) { return y.id !== m.id; }); }); }),
         delTxt: self.delTxt(key),
         subAberto: s.fs.metaId === m.id,
-        abrirSub: function () { self.setState({ fs: Object.assign(fsVazio(), { metaId: m.id }) }); }
+        abrirSub: function () { var o = Object.assign({}, self.state.metaAbertas); o[m.id] = true; self.setState({ fs: Object.assign(fsVazio(), { metaId: m.id }), metaAbertas: o }); },
+        subsAbertas: !!s.metaAbertas[m.id], ariaSub: s.metaAbertas[m.id] ? 'true' : 'false', rotSub: s.metaAbertas[m.id] ? '90deg' : '0deg',
+        toggleSub: function () { var o = Object.assign({}, self.state.metaAbertas); o[m.id] = !o[m.id]; self.setState({ metaAbertas: o }); },
+        semSubsValor: subs.length === 0, temEtapas: subs.length > 0,
+        etapas: subs.map(function (x) { return { nome: x.nome + ' · ' + x.status, cor: x.status === 'Concluída' ? '#1F4D3A' : '#E3E5E1' }; }),
+        etapasTxt: subs.length ? subs.filter(function (x) { return x.status === 'Concluída'; }).length + ' de ' + subs.length + (subs.length === 1 ? ' subetapa cumprida' : ' subetapas cumpridas') : 'nenhuma subetapa'
       };
     });
     proximas.sort(function (a, b) { return a.prazo.localeCompare(b.prazo); });
@@ -1136,11 +1224,13 @@ class Component extends DCLogic {
       acGrupos: acGrupos, acVazio: acab.length === 0, acTemGraf: acMeses.length > 0, acGraf: acGraf, acTotal: String(acTotalUn),
       acMesAtual: String(unMes(mesAtual)), acMesNome: mesNome(mesAtual), acMesPassado: String(unMes(addMes(mesAtual, -1))),
       acMedia: acMeses.length ? (Math.round((acTotalUn - acSem.reduce(function (t, a) { return t + (+a.unidades || 1); }, 0)) / acMeses.length * 10) / 10).toLocaleString('pt-BR') : '0',
-      iaAberto: !!s.ia.modo, iaModoGastos: s.ia.modo === 'gastos', iaModoInv: s.ia.modo === 'inv',
-      iaTitulo: s.ia.modo === 'inv' ? 'Adicionar produtos por voz' : 'Lançar gastos por voz, PDF ou print',
-      iaDica: s.ia.modo === 'inv' ? 'Toque em Gravar e diga os produtos, por exemplo: “comprei dois shampoos Lola de cachos, validade dezembro de 2027”. Toque de novo para parar. A IA monta a lista e você confere antes de salvar.'
+      iaAberto: !!s.ia.modo, iaModoGastos: s.ia.modo === 'gastos', iaModoInv: s.ia.modo === 'inv', iaModoWish: s.ia.modo === 'wish', iaModoRast: s.ia.modo === 'rast', iaComArquivo: s.ia.modo !== 'inv',
+      iaTitulo: { inv: 'Adicionar produtos por voz', wish: 'Adicionar à wishlist por voz', rast: 'Registrar gastos do dia por voz' }[s.ia.modo] || 'Lançar gastos por voz, PDF ou print',
+      iaDica: s.ia.modo === 'wish' ? 'Toque em Gravar e diga o que quer comprar, por exemplo: “quero o sérum Principia de niacinamida, uns 70 reais, prioridade alta”. Também dá para enviar o print de um produto. A IA monta a lista e você confere antes de salvar.'
+        : s.ia.modo === 'rast' ? 'Toque em Gravar e diga os gastos de ' + dataBR(s.ia.dia || s.hSel) + ', por exemplo: “gastei 25 reais de almoço no Pix e 80 na farmácia no crédito”. Compras no crédito abrem o atalho para lançar na aba Gastos.'
+        : s.ia.modo === 'inv' ? 'Toque em Gravar e diga os produtos, por exemplo: “comprei dois shampoos Lola de cachos, validade dezembro de 2027”. Toque de novo para parar. A IA monta a lista e você confere antes de salvar.'
         : 'Grave um áudio com os gastos (ex.: “ontem gastei 32 reais no iFood no Visa”), envie o PDF da fatura ou um print. A IA monta a lista e você confere antes de salvar.',
-      iaPlaceholder: s.ia.modo === 'inv' ? 'Ex.: 1 condicionador Salon Line, validade 03/2027' : 'Ex.: mercado 154,90 no débito hoje',
+      iaPlaceholder: s.ia.modo === 'wish' ? 'Ex.: protetor solar Bioré, uns 60 reais' : s.ia.modo === 'rast' ? 'Ex.: almoço 25 no Pix, farmácia 80 no crédito' : s.ia.modo === 'inv' ? 'Ex.: 1 condicionador Salon Line, validade 03/2027' : 'Ex.: mercado 154,90 no débito hoje',
       iaSemChave: !d.settings.geminiKey || s.ia.trocar, iaTemChave: !!d.settings.geminiKey && !s.ia.trocar,
       iaChaveTxt: s.ia.chave, iaOnChave: function (e) { self.iaSet({ chave: e.target.value }); },
       iaSalvarChave: function () { var k = String(self.state.ia.chave || '').trim(); k = k.replace(/\s+/g, ''); if (!/^(AIza[\w-]{30,}|AQ\.[\w.-]{20,})$/.test(k)) { self.iaSet({ erro: 'Essa chave não parece certa. Copie a chave inteira no Google AI Studio (botão “Copiar chave”): ela começa com AQ. ou AIza.' }); return; } self.upd(function (x) { x.settings.geminiKey = k; }); self.iaSet({ chave: '', trocar: false, erro: '' }); },
@@ -1151,7 +1241,7 @@ class Component extends DCLogic {
       iaProcessando: s.ia.proc || s.ia.gravando, iaProcTxt: s.ia.gravando ? 'Gravando… fale os itens e toque em “Parar e enviar”.' : s.ia.procTxt,
       iaTemErro: !!s.ia.erro, iaErro: s.ia.erro,
       iaTemItens: s.ia.itens.length > 0,
-      iaResumo: (function () { var n = s.ia.itens.filter(function (x) { return x.incluir; }).length; if (s.ia.modo === 'inv') return n + (n === 1 ? ' produto selecionado' : ' produtos selecionados'); var t = r2(s.ia.itens.filter(function (x) { return x.incluir; }).reduce(function (a, x) { return a + num(x.valor); }, 0)); return n + (n === 1 ? ' gasto' : ' gastos') + ' · ' + brl(t); })(),
+      iaResumo: (function () { var n = s.ia.itens.filter(function (x) { return x.incluir; }).length; if (s.ia.modo === 'inv' || s.ia.modo === 'wish') return n + (n === 1 ? ' produto selecionado' : ' produtos selecionados'); var t = r2(s.ia.itens.filter(function (x) { return x.incluir; }).reduce(function (a, x) { return a + num(x.valor); }, 0)); return n + (n === 1 ? ' gasto' : ' gastos') + ' · ' + brl(t); })(),
       iaMes: s.ia.mes, iaOnMes: function (e) { self.iaSet({ mes: e.target.value }); },
       iaMesOpts: (function () { var b = s.ia.mes || mes, o = []; for (var i = -6; i <= 6; i++) { var k = addMes(b, i); o.push({ v: k, l: mesNome(k) }); } return o; })(),
       iaItens: s.ia.itens.map(function (it, i) {
@@ -1159,7 +1249,7 @@ class Component extends DCLogic {
         return Object.assign({}, it, { on: on, bg: it.incluir ? '#FFFFFF' : '#F5F6F3',
           onIncluir: function (e) { var l = self.state.ia.itens.slice(); l[i] = Object.assign({}, l[i], { incluir: e.target.checked }); self.iaSet({ itens: l }); } });
       }),
-      iaSalvar: function () { self.iaSalvar(); }, iaSalvarTxt: s.ia.modo === 'inv' ? 'Salvar no inventário' : 'Lançar gastos', iaDescartar: function () { self.iaSet({ itens: [], erro: '' }); },
+      iaSalvar: function () { self.iaSalvar(); }, iaSalvarTxt: { inv: 'Salvar no inventário', wish: 'Salvar na wishlist', rast: 'Registrar no dia' }[s.ia.modo] || 'Lançar gastos', iaDescartar: function () { self.iaSet({ itens: [], erro: '' }); },
       iaFechar: function () { self.iaFechar(); }, iaAbrirGastos: function () { self.iaAbrir('gastos'); }, iaAbrirInv: function () { self.iaAbrir('inv'); },
       tabHome: s.tab === 'home', tabGastos: s.tab === 'gastos', tabMetas: s.tab === 'metas', tabHab: s.tab === 'habitos', tabWish: s.tab === 'wishlist', tabInv: s.tab === 'inventario', tabAcab: s.tab === 'acabados',
       showBackup: s.showBackup, backupTxt: s.showBackup ? JSON.stringify(d) : '',
@@ -1230,8 +1320,18 @@ class Component extends DCLogic {
       hMesTxt: mesNome(hm), hPrev: function () { self.setState({ hMes: addMes(hm, -1) }); }, hNext: function () { self.setState({ hMes: addMes(hm, 1) }); },
       semana: ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'], cells: cells,
       hSelTxt: 'Dia ' + dataBR(s.hSel), hValor: s.hValor, onHValor: this.setv('hValor'),
-      salvarDia: function () { var v = String(self.state.hValor).trim(); var iso = self.state.hSel; if (v === '') return; var n = r2(num(v)); self.upd(function (x) { x.habitos[iso] = n; }); },
-      limparDia: function () { var iso = self.state.hSel; self.upd(function (x) { delete x.habitos[iso]; }); self.setState({ hValor: '' }); },
+      salvarDia: function () { var v = r2(num(self.state.hValor)); if (!(v > 0)) return; self.addGastosDia(self.state.hSel, [{ valor: v, desc: self.state.hDesc, forma: self.state.hForma }]); self.setState({ hValor: '', hDesc: '', hForma: 'Pix' }); },
+      hDesc: s.hDesc, onHDesc: this.setv('hDesc'), hForma: s.hForma, onHForma: this.setv('hForma'), formaROpts: FORMAS_R.map(function (f) { return { v: f }; }),
+      hDet: this.detDia(d, s.hSel).map(function (e) { return { desc: e.desc || (e.id === 'antigo' ? 'Registro do dia (sem detalhes)' : 'Sem descrição'), forma: e.forma, temForma: !!e.forma,
+        formaBg: e.forma === 'Crédito' ? '#EFE6D6' : '#E8F1EA', formaFg: e.forma === 'Crédito' ? '#6B5432' : '#24533F', valorTxt: brl(e.valor), del: function () { self.removerGastoDia(self.state.hSel, e.id); } }; }),
+      hSemDet: this.detDia(d, s.hSel).length === 0, hTotalDia: brl(d.habitos[s.hSel] || 0),
+      iaAbrirRast: function () { self.iaAbrir('rast'); }, iaAbrirWish: function () { self.iaAbrir('wish'); },
+      credAberto: !!s.cred, cred: s.cred || {}, credOn: this.binder('cred'), salvarCred: function () { self.salvarCred(); }, pularCred: function () { self.proximoCred(); },
+      credErro: s.cred && s.cred.erro || '', credTemErro: !!(s.cred && s.cred.erro),
+      credParcTxt: s.cred && (parseInt(s.cred.parcelas, 10) || 1) > 1 ? (parseInt(s.cred.parcelas, 10) + 'x de ' + brl(r2(num(s.cred.valor) / (parseInt(s.cred.parcelas, 10) || 1)))) : '',
+      credFilaTxt: s.credFila.length ? 'Depois desta, ' + (s.credFila.length === 1 ? 'mais 1 compra no crédito.' : 'mais ' + s.credFila.length + ' compras no crédito.') : '',
+      credMesOpts: (function () { var b = s.cred ? s.cred.mes : mes, o = []; for (var i = -1; i <= 3; i++) { var k = addMes(b, i); o.push({ v: k, l: mesNome(k) }); } return o; })(),
+      limparDia: function () { var iso = self.state.hSel; self.upd(function (x) { delete x.habitos[iso]; if (x.habDet) delete x.habDet[iso]; }); self.setState({ hValor: '' }); },
       hMedia: hn ? brl(hmed) : '—', hDentro: String(dentro), hAcima: String(hn - dentro), hPct: pctTxt(pct(dentro, hn)),
       hFolgaTxt: !hn ? 'nenhum dia registrado' : folga >= 0 ? 'folga de ' + brl(folga) + ' até o limite' : brl(-folga) + ' acima do limite',
       ind: ind,
