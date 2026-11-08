@@ -36,7 +36,8 @@ function migrarAcabados(d) {
   d.inventario = fica; d.acabV = 1; return d;
 }
 // ---------- IA (Google Gemini) ----------
-var IA_MODELOS = ['gemini-flash-latest', 'gemini-3.5-flash-lite', 'gemini-2.5-flash'];
+var IA_RESERVA = ['gemini-flash-latest', 'gemini-flash-lite-latest', 'gemini-3.8-flash', 'gemini-3.6-flash'];
+var iaModelosCache = null;
 function iaVazio(modo, mes) { return { modo: modo || '', mes: mes || '', chave: '', trocar: false, texto: '', proc: false, procTxt: '', erro: '', itens: [], gravando: false }; }
 function blobBase64(blob) { return new Promise(function (res, rej) { var r = new FileReader(); r.onload = function () { res(String(r.result).split(',')[1] || ''); }; r.onerror = function () { rej(r.error); }; r.readAsDataURL(blob); }); }
 function paraWav(blob) {
@@ -56,30 +57,57 @@ function paraWav(blob) {
     });
   });
 }
+// lista os modelos "flash" que a chave pode usar, do mais novo para o mais antigo (guarda por 1 dia)
+function modelosGemini(chave) {
+  if (iaModelosCache && iaModelosCache.chave === chave && Date.now() - iaModelosCache.em < 864e5) return Promise.resolve(iaModelosCache.lista);
+  try { var c = JSON.parse(lerPref('fin-ia-modelos', 'null')); if (c && c.chave === String(chave).slice(-6) && Date.now() - c.em < 864e5 && c.lista.length) { iaModelosCache = { chave: chave, em: c.em, lista: c.lista }; return Promise.resolve(c.lista); } } catch (e) {}
+  return fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=200', { headers: { 'x-goog-api-key': chave } })
+    .then(function (r) { return r.ok ? r.json() : { models: [] }; })
+    .then(function (j) {
+      var ver = function (n) { var m = n.match(/gemini-(\d+(?:\.\d+)?)/); return m ? parseFloat(m[1]) : 0; };
+      var lista = (j.models || []).filter(function (m) {
+        var n = String(m.name || '').replace('models/', '');
+        return (m.supportedGenerationMethods || []).indexOf('generateContent') >= 0 && /^gemini-.*flash/.test(n) && !/image|tts|live|audio|embed|thinking|robotics|computer|exp/.test(n);
+      }).map(function (m) { return String(m.name).replace('models/', ''); });
+      lista.sort(function (a, b) {
+        return ((/lite/.test(a)) - (/lite/.test(b))) || ((/preview/.test(a)) - (/preview/.test(b))) || (ver(b) - ver(a)) || ((/latest/.test(a)) - (/latest/.test(b))) || a.length - b.length;
+      });
+      lista = lista.slice(0, 6);
+      if (lista.length) { iaModelosCache = { chave: chave, em: Date.now(), lista: lista }; gravarPref('fin-ia-modelos', JSON.stringify({ chave: String(chave).slice(-6), em: Date.now(), lista: lista })); }
+      return lista;
+    }).catch(function () { return []; });
+}
 function chamarGemini(chave, parts, schema) {
   var corpo = JSON.stringify({ contents: [{ role: 'user', parts: parts }], generationConfig: { responseMimeType: 'application/json', responseSchema: schema, temperature: 0.1 } });
-  var tentar = function (i, ultimoErro) {
-    if (i >= IA_MODELOS.length) return Promise.reject(ultimoErro || new Error('Nenhum modelo da IA respondeu.'));
-    return fetch('https://generativelanguage.googleapis.com/v1beta/models/' + IA_MODELOS[i] + ':generateContent', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': chave }, body: corpo })
-      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { st: r.status, j: j }; }); })
-      .then(function (x) {
-        if (x.st === 200) {
-          var c = x.j.candidates && x.j.candidates[0], t = c && c.content && (c.content.parts || []).map(function (pp) { return pp.text || ''; }).join('');
-          if (!t) { var e0 = new Error('A IA não conseguiu ler esse conteúdo. Tente de novo com um áudio mais claro ou outro arquivo.'); e0.fim = true; throw e0; }
-          try { return JSON.parse(t); } catch (e) { var e1 = new Error('A IA respondeu num formato inesperado. Tente de novo.'); e1.fim = true; throw e1; }
-        }
-        var msg = (x.j.error && x.j.error.message) || '';
-        var e = new Error(msg || ('Erro ' + x.st));
-        if (x.st === 401 || (x.st === 400 && /API key|API_KEY/i.test(msg))) { e.message = 'A chave da IA não é válida. Toque em “Trocar a chave da IA” e cole a chave de novo.'; e.fim = true; }
-        else if (x.st === 403) { e.message = 'A chave da IA não tem permissão. Crie uma chave nova em aistudio.google.com/apikey.'; e.fim = true; }
-        else if (x.st === 413) { e.message = 'O arquivo é grande demais para a IA. Envie um PDF ou imagem menor.'; e.fim = true; }
-        else if (x.st === 429) e.message = 'Limite gratuito da IA atingido por agora. Espere um minuto e tente de novo.';
-        else if (x.st === 400) { e.message = 'A IA não aceitou esse conteúdo: ' + msg; }
-        throw e;
-      })
-      .catch(function (e) { if (e.fim) throw e; if (e instanceof TypeError) { var en = new Error('Sem conexão com a IA. Verifique a internet e tente de novo.'); return tentar(i + 1, en); } return tentar(i + 1, e); });
-  };
-  return tentar(0, null);
+  return modelosGemini(chave).then(function (lista) {
+    var fila = lista.concat(IA_RESERVA.filter(function (m) { return lista.indexOf(m) < 0; })), tentados = {};
+    var tentar = function (i, ultimoErro) {
+      while (i < fila.length && tentados[fila[i]]) i++;
+      if (i >= fila.length) { iaModelosCache = null; gravarPref('fin-ia-modelos', 'null'); return Promise.reject(ultimoErro || new Error('Nenhum modelo da IA respondeu. Tente de novo em alguns minutos.')); }
+      var modelo = fila[i]; tentados[modelo] = true;
+      return fetch('https://generativelanguage.googleapis.com/v1beta/models/' + modelo + ':generateContent', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': chave }, body: corpo })
+        .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { st: r.status, j: j }; }); })
+        .then(function (x) {
+          if (x.st === 200) {
+            var c = x.j.candidates && x.j.candidates[0], t = c && c.content && (c.content.parts || []).map(function (pp) { return pp.text || ''; }).join('');
+            if (!t) { var e0 = new Error('A IA não conseguiu ler esse conteúdo. Tente de novo com um áudio mais claro ou outro arquivo.'); e0.fim = true; throw e0; }
+            try { return JSON.parse(t); } catch (e) { var e1 = new Error('A IA respondeu num formato inesperado. Tente de novo.'); e1.fim = true; throw e1; }
+          }
+          var msg = (x.j.error && x.j.error.message) || '';
+          var e = new Error('A IA do Google não respondeu agora (erro ' + x.st + '). Tente de novo em alguns minutos.');
+          var sugerido = (msg.match(/use (?:models\/)?(gemini-[\w.-]+)/i) || [])[1];
+          if (sugerido && !tentados[sugerido]) fila.splice(i + 1, 0, sugerido.replace(/[.,]$/, ''));
+          if (x.st === 401 || (x.st === 400 && /API key|API_KEY/i.test(msg)) || (x.st === 403 && /API key|API_KEY|key/i.test(msg) && !/model/i.test(msg))) { e.message = 'A chave da IA não é válida. Toque em “Trocar a chave da IA” e cole a chave de novo.'; e.fim = true; }
+          else if (x.st === 413) { e.message = 'O arquivo é grande demais para a IA. Envie um PDF ou imagem menor.'; e.fim = true; }
+          else if (x.st === 429) e.message = 'Limite gratuito da IA atingido por agora. Espere um minuto e tente de novo.';
+          else if (x.st === 503 || x.st === 500) e.message = 'A IA do Google está sobrecarregada agora. Tente de novo em alguns minutos.';
+          else if (x.st === 400 && !/model/i.test(msg)) { e.message = 'A IA não aceitou esse conteúdo. Tente outro arquivo ou um print mais nítido.'; e.fim = true; }
+          throw e;
+        })
+        .catch(function (e) { if (e.fim) throw e; if (e instanceof TypeError) { var en = new Error('Sem conexão com a IA. Verifique a internet e tente de novo.'); return tentar(i + 1, en); } return tentar(i + 1, e); });
+    };
+    return tentar(0, null);
+  });
 }
 
 
