@@ -338,7 +338,7 @@ class Component extends DCLogic {
       showFi: false, fi: fiVazio(), iBusca: '', iCat: 'Todas', iMarca: 'Todas', iStatus: 'Todos', iTipo: 'Todos', iVal: 'todos',
       notif: '', tick: 0, showBackup: false, importTxt: '', importMsg: '', backupMsg: '',
       menu: telaEstreita() ? 'fechado' : lerPref('fin-menu', 'aberto'), tema: temaInicial(),
-      colAbertas: {}, invAbertas: {}, tiposAbertos: {}, acAbertos: {}, acabando: '', acabarSemData: false, metaAbertas: {}, hDesc: '', hForma: 'Pix', cred: null, credFila: [], ia: iaVazio()
+      colAbertas: {}, invAbertas: {}, tiposAbertos: {}, acAbertos: {}, acabando: '', acabarSemData: false, metaAbertas: {}, histAbertos: {}, acabarData: '', showFa: false, fa: { nome: '', marca: '', validade: '', data: '' }, hDesc: '', hForma: 'Pix', cred: null, credFila: [], ia: iaVazio()
     };
   })();
 
@@ -391,18 +391,25 @@ class Component extends DCLogic {
   alternarMenu() { var m = this.state.menu === 'aberto' ? 'fechado' : 'aberto'; if (!telaEstreita()) gravarPref('fin-menu', m); this.setState({ menu: m }); }
 
   // ---------- acabados ----------
-  acabar(id, todas, semData) {
+  acabar(id, todas, semData, data) {
     var self = this;
     this.upd(function (d) {
       var z = d.inventario.find(function (q) { return q.id === id; }); if (!z) return;
       var tem = Math.max(1, parseInt(z.quantidade, 10) || 1), n = todas ? tem : 1;
       d.acabados = d.acabados || [];
       var snap = clone(z); snap.quantidade = n;
-      d.acabados.push({ id: uid(), invId: z.id, nome: z.nome, marca: z.marca || '', categoria: z.categoria, tipo: z.tipo || '', unidades: n, data: semData ? '' : hoje(), item: snap });
+      d.acabados.push({ id: uid(), invId: z.id, nome: z.nome, marca: z.marca || '', categoria: z.categoria, tipo: z.tipo || '', unidades: n, data: semData ? '' : (/^\d{4}-\d{2}-\d{2}$/.test(data || '') ? data : hoje()), item: snap });
       if (tem - n >= 1) z.quantidade = tem - n;
       else d.inventario = d.inventario.filter(function (q) { return q.id !== id; });
     });
     this.setState({ acabando: '' });
+  }
+  salvarFa() {
+    var f = this.state.fa;
+    if (!String(f.nome).trim()) { this.setState({ erro: 'Informe o nome do produto.' }); return; }
+    this.upd(function (d) { d.acabados = d.acabados || []; d.acabados.push({ id: uid(), invId: '', manual: true, nome: String(f.nome).trim(), marca: String(f.marca || '').trim(), categoria: '', tipo: '', unidades: 1, validade: f.validade || '', data: f.data || '' }); });
+    var o = Object.assign({}, this.state.acAbertos); if (f.data) o[f.data.slice(0, 7)] = true; else o.__sem = true;
+    this.setState({ showFa: false, fa: { nome: '', marca: '', validade: '', data: '' }, erro: '', acAbertos: o });
   }
   devolver(acId) {
     this.upd(function (d) {
@@ -470,6 +477,15 @@ class Component extends DCLogic {
       schema = { type: 'OBJECT', properties: { mesFatura: { type: 'STRING' }, itens: { type: 'ARRAY', items: { type: 'OBJECT', properties: {
         descricao: { type: 'STRING' }, valor: { type: 'NUMBER' }, data: { type: 'STRING' }, categoria: { type: 'STRING', enum: d.categorias.slice() },
         coluna: { type: 'STRING', enum: ['visa', 'master', 'cartao', 'demais'] }, parcelaAtual: { type: 'INTEGER' }, parcelas: { type: 'INTEGER' } }, required: ['descricao', 'valor'] } } }, required: ['itens'] };
+    } else if (ia.modo === 'acab') {
+      prompt = 'Você registra produtos que a pessoa terminou de usar (produtos acabados) num app brasileiro. Hoje é ' + dataBR(H) + ' (' + H + ').\n' +
+        'Leia o conteúdo a seguir (' + oque + ') e liste cada produto.\n' +
+        '- nome: nome do produto sem a marca. marca: a marca, se aparecer.\n' +
+        '- validade: AAAA-MM-DD; se só tiver mês e ano, use o último dia do mês; se não aparecer, deixe vazio.\n' +
+        '- dataAcabou: AAAA-MM-DD da data em que o produto acabou, se for informada; senão deixe vazio.\n' +
+        '- Não invente nada.';
+      schema = { type: 'OBJECT', properties: { produtos: { type: 'ARRAY', items: { type: 'OBJECT', properties: {
+        nome: { type: 'STRING' }, marca: { type: 'STRING' }, validade: { type: 'STRING' }, dataAcabou: { type: 'STRING' } }, required: ['nome'] } } }, required: ['produtos'] };
     } else if (ia.modo === 'wish') {
       prompt = 'Você cadastra produtos numa lista de desejos (wishlist) de um app brasileiro. Hoje é ' + dataBR(H) + '.\n' +
         'Leia o conteúdo a seguir (' + oque + ') e liste cada produto que a pessoa quer comprar.\n' +
@@ -520,6 +536,11 @@ class Component extends DCLogic {
             parcelaAtual: String(at), parcelas: String(pa) };
         });
         self.iaSet({ proc: false, itens: itens, mes: mesAlvo, erro: itens.length ? '' : 'A IA não encontrou despesas nesse conteúdo.' });
+      } else if (cur.modo === 'acab') {
+        itens = (r.produtos || []).filter(function (x) { return x && x.nome; }).map(function (x) {
+          return { incluir: true, dup: false, nome: String(x.nome).trim(), marca: String(x.marca || '').trim(), validade: dataOk(x.validade), data: dataOk(x.dataAcabou) };
+        });
+        self.iaSet({ proc: false, itens: itens, erro: itens.length ? '' : 'A IA não encontrou produtos nesse conteúdo.' });
       } else if (cur.modo === 'wish') {
         itens = (r.produtos || []).filter(function (x) { return x && x.nome; }).map(function (x) {
           return { incluir: true, dup: false, nome: String(x.nome).trim(), marca: String(x.marca || '').trim(), cat: dd.wishCats.indexOf(x.cat) >= 0 ? x.cat : (dd.wishCats[0] || 'Outros'),
@@ -553,6 +574,13 @@ class Component extends DCLogic {
         });
       });
       this.setState({ ia: iaVazio(), mes: ia.mes, tab: 'gastos', colAbertas: {} });
+    } else if (ia.modo === 'acab') {
+      var abA = Object.assign({}, this.state.acAbertos);
+      this.upd(function (d) {
+        d.acabados = d.acabados || [];
+        sel.forEach(function (x) { d.acabados.push({ id: uid(), invId: '', manual: true, nome: String(x.nome).trim(), marca: String(x.marca || '').trim(), categoria: '', tipo: '', unidades: 1, validade: x.validade || '', data: x.data || '' }); if (x.data) abA[x.data.slice(0, 7)] = true; else abA.__sem = true; });
+      });
+      this.setState({ ia: iaVazio(), tab: 'acabados', acAbertos: abA });
     } else if (ia.modo === 'wish') {
       this.upd(function (d) {
         sel.forEach(function (x) { d.wishlist.push({ id: uid(), status: 'Desejado', incluido: hoje(), cat: x.cat, nome: String(x.nome).trim(), marca: String(x.marca || '').trim(), validade: '', valor: r2(num(x.valor)), prioridade: x.prioridade, link: '', obs: '' }); });
@@ -1133,11 +1161,13 @@ class Component extends DCLogic {
         grupo: pr.categoria + (pr.tipo ? ' · ' + pr.tipo : ''), tipoG: pr.tipo || 'Sem tipo', vermelho: x.vi.k === 'vermelho', nome: pr.nome,
         final: false, op: '1', ckAria: 'Acabou: ' + pr.nome,
         un: un, unTxt: un + (un === 1 ? ' un.' : ' un.'), marcando: s.acabando === pr.id, variasUn: un > 1,
-        pergunta: un > 1 ? 'Você tem ' + un + ' unidades. O que acabou?' : (s.acabarSemData ? 'Marcar “' + pr.nome + '” como acabado, sem data?' : 'Marcar “' + pr.nome + '” como acabado em ' + dataBR(H) + '?'),
+        pergunta: un > 1 ? 'Você tem ' + un + ' unidades. O que acabou?' : 'Marcar “' + pr.nome + '” como acabado?',
+        dataAcabou: s.acabarData || H, comData: !s.acabarSemData, ehHoje: (s.acabarData || H) === H,
+        onDataAcabou: function (e) { self.setState({ acabarData: e.target.value }); }, usarHoje: function () { self.setState({ acabarData: H, acabarSemData: false }); },
         acabou1Txt: un > 1 ? 'Acabou 1 unidade' : 'Sim, acabou', acabouTodasTxt: 'Acabaram as ' + un,
-        acabou1: function () { self.acabar(pr.id, false, self.state.acabarSemData); }, acabouTodas: function () { self.acabar(pr.id, true, self.state.acabarSemData); }, cancelarAcabar: function () { self.setState({ acabando: '' }); },
+        acabou1: function () { self.acabar(pr.id, false, self.state.acabarSemData, self.state.acabarData); }, acabouTodas: function () { self.acabar(pr.id, true, self.state.acabarSemData, self.state.acabarData); }, cancelarAcabar: function () { self.setState({ acabando: '' }); },
         semData: !!s.acabarSemData, onSemData: function (e) { self.setState({ acabarSemData: e.target.checked }); },
-        toggle: function (e) { self.setState({ acabando: e.target.checked ? pr.id : '', acabarSemData: false }); }, categoria: pr.categoria, status: pr.status, temStatus: !!pr.status, detalhe: det.join(' · '), temObs: !!pr.obs, obs: pr.obs,
+        toggle: function (e) { self.setState({ acabando: e.target.checked ? pr.id : '', acabarSemData: false, acabarData: H }); }, categoria: pr.categoria, status: pr.status, temStatus: !!pr.status, detalhe: det.join(' · '), temObs: !!pr.obs, obs: pr.obs,
         alerta: x.vi.txt, aBg: x.vi.bg, aFg: x.vi.fg, dot: x.vi.dot,
         edit: function () { self.setState({ showFi: true, erro: '', fi: { editId: pr.id, validadeOrig: pr.validade || '', validadeTxt: pr.validadeTxt || '', tipo: pr.tipo || '', nome: pr.nome, categoria: pr.categoria, marca: pr.marca || '', aquisicao: pr.aquisicao || '', validade: pr.validade || '', quantidade: String(pr.quantidade == null ? 1 : pr.quantidade), valor: pr.valor ? String(pr.valor).replace('.', ',') : '', status: pr.status || '', obs: pr.obs || '' } }); },
         del: self.confirmar(key, function () { self.upd(function (y) { y.inventario = y.inventario.filter(function (z) { return z.id !== pr.id; }); }); }),
@@ -1178,6 +1208,25 @@ class Component extends DCLogic {
     }).filter(function (x) { return x.mostrar; });
     var cnt = function (k) { return somaUn(inv.filter(function (x) { return x.vi.k === k; }), function (x) { return x.pr; }); };
 
+    // ----- histórico do rastreador -----
+    var DSEM = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+    var histDias = Object.keys(d.habitos).filter(function (k) { return /^\d{4}-\d{2}-\d{2}$/.test(k) && d.habitos[k] != null; }).sort().reverse();
+    var histMeses = []; histDias.forEach(function (k) { var m = k.slice(0, 7); if (histMeses.indexOf(m) < 0) histMeses.push(m); });
+    var formaCor = function (f) { return f === 'Crédito' ? ['#EFE6D6', '#6B5432'] : ['#E8F1EA', '#24533F']; };
+    var hist = histMeses.map(function (m) {
+      var ds = histDias.filter(function (k) { return k.slice(0, 7) === m; });
+      var tot = r2(ds.reduce(function (a, k) { return a + (+d.habitos[k] || 0); }, 0));
+      var ab = s.histAbertos[m] != null ? s.histAbertos[m] : m === hm;
+      return { titulo: mesNome(m), totalTxt: brl(tot), diasTxt: ds.length + (ds.length === 1 ? ' dia' : ' dias'), aberto: ab, ariaExp: ab ? 'true' : 'false', rot: ab ? '90deg' : '0deg',
+        toggle: function () { var o = Object.assign({}, self.state.histAbertos); o[m] = !ab; self.setState({ histAbertos: o }); },
+        dias: ds.map(function (k) {
+          var p2 = k.split('-').map(Number), dow = new Date(p2[0], p2[1] - 1, p2[2]).getDay(), v = +d.habitos[k] || 0;
+          return { titulo: DSEM[dow] + ', ' + dataBR(k), totalTxt: brl(v), cor: v <= meta ? '#2E6349' : '#8C3B2E',
+            abrir: function () { self.setState({ hMes: m }); self.selDia(k); try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (e) {} },
+            itens: self.detDia(d, k).map(function (e) { var c = formaCor(e.forma); return { desc: e.desc || (e.id === 'antigo' ? 'Registro do dia (sem detalhes)' : 'Sem descrição'), forma: e.forma, temForma: !!e.forma, formaBg: c[0], formaFg: c[1], valorTxt: brl(e.valor) }; }) };
+        }) };
+    });
+
     // ----- acabados -----
     var acab = (d.acabados || []).slice().sort(function (a, b) { return String(b.data).localeCompare(String(a.data)); });
     var acPorMes = {}, acMeses = [];
@@ -1193,8 +1242,10 @@ class Component extends DCLogic {
         itens: acPorMes[k].map(acItem) };
     });
     function acItem(a) {
-          var key = 'a:' + a.id, det = [a.categoria + (a.tipo ? ' · ' + a.tipo : '')]; if (a.marca) det.unshift(a.marca);
-          return { nome: a.nome, unTxt: (+a.unidades || 1) + ' un.', detalhe: det.join(' · '), dataTxt: dataBR(a.data), temData: !!a.data, semData: !a.data,
+          var key = 'a:' + a.id, det = [];
+          if (a.marca) det.push(a.marca); if (a.categoria) det.push(a.categoria + (a.tipo ? ' · ' + a.tipo : ''));
+          var val = a.validade || (a.item && a.item.validade); if (val) det.push('validade ' + dataBR(val)); if (a.manual) det.push('incluído manualmente');
+          return { nome: a.nome, unTxt: (+a.unidades || 1) + ' un.', detalhe: det.join(' · ') || '—', doInventario: !a.manual, dataTxt: dataBR(a.data), temData: !!a.data, semData: !a.data,
             onData: function (e) { var v = e.target.value; if (!v) return; self.upd(function (x) { var y = (x.acabados || []).find(function (z) { return z.id === a.id; }); if (y) y.data = v; }); },
             desfazer: function () { self.devolver(a.id); },
             del: self.confirmar(key, function () { self.upd(function (x) { x.acabados = (x.acabados || []).filter(function (y) { return y.id !== a.id; }); }); }), delTxt: self.delTxt(key) };
@@ -1221,16 +1272,21 @@ class Component extends DCLogic {
       onMetaMensal: function (e) { var t = String(e.target.value).trim(), v = num(t); self.upd(function (x) { if (!t || !(v > 0)) delete x.settings.metaMensal; else x.settings.metaMensal = r2(v); }); },
       cronLibera: brl(cronLibera),
       wSaldoTxt: brl(wSaldo), wSaldoMes: mesNome(mesAtual), wSaldoCor: wSaldo < 0 ? '#8C3B2E' : '#24533F', wSaldoBg: wSaldo < 0 ? '#F8ECE8' : '#E8F1EA',
+      hist: hist, histVazio: hist.length === 0, histResumo: histDias.length ? histDias.length + (histDias.length === 1 ? ' dia registrado' : ' dias registrados') : '',
+      showFa: s.showFa, fa: s.fa, faOn: this.binder('fa'), salvarFa: function () { self.salvarFa(); },
+      abrirFa: function () { self.setState({ showFa: true, erro: '', fa: { nome: '', marca: '', validade: '', data: H } }); }, fecharFa: function () { self.setState({ showFa: false, erro: '' }); },
+      iaAbrirAcab: function () { self.iaAbrir('acab'); },
       acGrupos: acGrupos, acVazio: acab.length === 0, acTemGraf: acMeses.length > 0, acGraf: acGraf, acTotal: String(acTotalUn),
       acMesAtual: String(unMes(mesAtual)), acMesNome: mesNome(mesAtual), acMesPassado: String(unMes(addMes(mesAtual, -1))),
       acMedia: acMeses.length ? (Math.round((acTotalUn - acSem.reduce(function (t, a) { return t + (+a.unidades || 1); }, 0)) / acMeses.length * 10) / 10).toLocaleString('pt-BR') : '0',
-      iaAberto: !!s.ia.modo, iaModoGastos: s.ia.modo === 'gastos', iaModoInv: s.ia.modo === 'inv', iaModoWish: s.ia.modo === 'wish', iaModoRast: s.ia.modo === 'rast', iaComArquivo: s.ia.modo !== 'inv',
-      iaTitulo: { inv: 'Adicionar produtos por voz', wish: 'Adicionar à wishlist por voz', rast: 'Registrar gastos do dia por voz' }[s.ia.modo] || 'Lançar gastos por voz, PDF ou print',
-      iaDica: s.ia.modo === 'wish' ? 'Toque em Gravar e diga o que quer comprar, por exemplo: “quero o sérum Principia de niacinamida, uns 70 reais, prioridade alta”. Também dá para enviar o print de um produto. A IA monta a lista e você confere antes de salvar.'
+      iaAberto: !!s.ia.modo, iaModoGastos: s.ia.modo === 'gastos', iaModoInv: s.ia.modo === 'inv', iaModoWish: s.ia.modo === 'wish', iaModoRast: s.ia.modo === 'rast', iaModoAcab: s.ia.modo === 'acab', iaComArquivo: s.ia.modo !== 'inv',
+      iaTitulo: { acab: 'Incluir acabados por PDF, foto ou voz', inv: 'Adicionar produtos por voz', wish: 'Adicionar à wishlist por voz', rast: 'Registrar gastos do dia por voz' }[s.ia.modo] || 'Lançar gastos por voz, PDF ou print',
+      iaDica: s.ia.modo === 'acab' ? 'Envie um PDF ou uma foto (por exemplo, a lista ou a embalagem dos produtos que acabaram), grave um áudio ou escreva. A IA monta a lista com produto, marca, validade e data em que acabou, e você confere antes de salvar.'
+        : s.ia.modo === 'wish' ? 'Toque em Gravar e diga o que quer comprar, por exemplo: “quero o sérum Principia de niacinamida, uns 70 reais, prioridade alta”. Também dá para enviar o print de um produto. A IA monta a lista e você confere antes de salvar.'
         : s.ia.modo === 'rast' ? 'Toque em Gravar e diga os gastos de ' + dataBR(s.ia.dia || s.hSel) + ', por exemplo: “gastei 25 reais de almoço no Pix e 80 na farmácia no crédito”. Compras no crédito abrem o atalho para lançar na aba Gastos.'
         : s.ia.modo === 'inv' ? 'Toque em Gravar e diga os produtos, por exemplo: “comprei dois shampoos Lola de cachos, validade dezembro de 2027”. Toque de novo para parar. A IA monta a lista e você confere antes de salvar.'
         : 'Grave um áudio com os gastos (ex.: “ontem gastei 32 reais no iFood no Visa”), envie o PDF da fatura ou um print. A IA monta a lista e você confere antes de salvar.',
-      iaPlaceholder: s.ia.modo === 'wish' ? 'Ex.: protetor solar Bioré, uns 60 reais' : s.ia.modo === 'rast' ? 'Ex.: almoço 25 no Pix, farmácia 80 no crédito' : s.ia.modo === 'inv' ? 'Ex.: 1 condicionador Salon Line, validade 03/2027' : 'Ex.: mercado 154,90 no débito hoje',
+      iaPlaceholder: s.ia.modo === 'acab' ? 'Ex.: acabou o shampoo Lola ontem, validade 05/2027' : s.ia.modo === 'wish' ? 'Ex.: protetor solar Bioré, uns 60 reais' : s.ia.modo === 'rast' ? 'Ex.: almoço 25 no Pix, farmácia 80 no crédito' : s.ia.modo === 'inv' ? 'Ex.: 1 condicionador Salon Line, validade 03/2027' : 'Ex.: mercado 154,90 no débito hoje',
       iaSemChave: !d.settings.geminiKey || s.ia.trocar, iaTemChave: !!d.settings.geminiKey && !s.ia.trocar,
       iaChaveTxt: s.ia.chave, iaOnChave: function (e) { self.iaSet({ chave: e.target.value }); },
       iaSalvarChave: function () { var k = String(self.state.ia.chave || '').trim(); k = k.replace(/\s+/g, ''); if (!/^(AIza[\w-]{30,}|AQ\.[\w.-]{20,})$/.test(k)) { self.iaSet({ erro: 'Essa chave não parece certa. Copie a chave inteira no Google AI Studio (botão “Copiar chave”): ela começa com AQ. ou AIza.' }); return; } self.upd(function (x) { x.settings.geminiKey = k; }); self.iaSet({ chave: '', trocar: false, erro: '' }); },
@@ -1241,7 +1297,7 @@ class Component extends DCLogic {
       iaProcessando: s.ia.proc || s.ia.gravando, iaProcTxt: s.ia.gravando ? 'Gravando… fale os itens e toque em “Parar e enviar”.' : s.ia.procTxt,
       iaTemErro: !!s.ia.erro, iaErro: s.ia.erro,
       iaTemItens: s.ia.itens.length > 0,
-      iaResumo: (function () { var n = s.ia.itens.filter(function (x) { return x.incluir; }).length; if (s.ia.modo === 'inv' || s.ia.modo === 'wish') return n + (n === 1 ? ' produto selecionado' : ' produtos selecionados'); var t = r2(s.ia.itens.filter(function (x) { return x.incluir; }).reduce(function (a, x) { return a + num(x.valor); }, 0)); return n + (n === 1 ? ' gasto' : ' gastos') + ' · ' + brl(t); })(),
+      iaResumo: (function () { var n = s.ia.itens.filter(function (x) { return x.incluir; }).length; if (s.ia.modo === 'inv' || s.ia.modo === 'wish' || s.ia.modo === 'acab') return n + (n === 1 ? ' produto selecionado' : ' produtos selecionados'); var t = r2(s.ia.itens.filter(function (x) { return x.incluir; }).reduce(function (a, x) { return a + num(x.valor); }, 0)); return n + (n === 1 ? ' gasto' : ' gastos') + ' · ' + brl(t); })(),
       iaMes: s.ia.mes, iaOnMes: function (e) { self.iaSet({ mes: e.target.value }); },
       iaMesOpts: (function () { var b = s.ia.mes || mes, o = []; for (var i = -6; i <= 6; i++) { var k = addMes(b, i); o.push({ v: k, l: mesNome(k) }); } return o; })(),
       iaItens: s.ia.itens.map(function (it, i) {
@@ -1249,7 +1305,7 @@ class Component extends DCLogic {
         return Object.assign({}, it, { on: on, bg: it.incluir ? '#FFFFFF' : '#F5F6F3',
           onIncluir: function (e) { var l = self.state.ia.itens.slice(); l[i] = Object.assign({}, l[i], { incluir: e.target.checked }); self.iaSet({ itens: l }); } });
       }),
-      iaSalvar: function () { self.iaSalvar(); }, iaSalvarTxt: { inv: 'Salvar no inventário', wish: 'Salvar na wishlist', rast: 'Registrar no dia' }[s.ia.modo] || 'Lançar gastos', iaDescartar: function () { self.iaSet({ itens: [], erro: '' }); },
+      iaSalvar: function () { self.iaSalvar(); }, iaSalvarTxt: { acab: 'Salvar em Acabados', inv: 'Salvar no inventário', wish: 'Salvar na wishlist', rast: 'Registrar no dia' }[s.ia.modo] || 'Lançar gastos', iaDescartar: function () { self.iaSet({ itens: [], erro: '' }); },
       iaFechar: function () { self.iaFechar(); }, iaAbrirGastos: function () { self.iaAbrir('gastos'); }, iaAbrirInv: function () { self.iaAbrir('inv'); },
       tabHome: s.tab === 'home', tabGastos: s.tab === 'gastos', tabMetas: s.tab === 'metas', tabHab: s.tab === 'habitos', tabWish: s.tab === 'wishlist', tabInv: s.tab === 'inventario', tabAcab: s.tab === 'acabados',
       showBackup: s.showBackup, backupTxt: s.showBackup ? JSON.stringify(d) : '',
