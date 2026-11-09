@@ -24,6 +24,20 @@ function aplicarTema(t) {
 }
 function isoDe(dt) { return dt.getFullYear() + '-' + pad(dt.getMonth() + 1) + '-' + pad(dt.getDate()); }
 function addDias(iso, n) { var p = iso.split('-').map(Number); return isoDe(new Date(p[0], p[1] - 1, p[2] + n)); }
+function cxNova(o) { return Object.assign({ id: uid(), nome: '', objetivo: 0, prazo: '', etapas: [], movs: [] }, o); }
+function cxGuardado(c) { return r2((c.movs || []).reduce(function (a, m) { return a + (+m.valor || 0); }, 0)); }
+function cxReserva(d) { return (d.caixinhas || []).find(function (c) { return c.fixo === 'reserva'; }); }
+function reservaOk(d) { var r = cxReserva(d); return !!(r && +r.objetivo > 0 && cxGuardado(r) >= +r.objetivo); }
+// cria a Reserva de Emergência e remove as metas em R$ (tipo retirado)
+function migrarCaixinha(d) {
+  if (d.cxV >= 1) return d;
+  d.caixinhas = d.caixinhas || [];
+  if (!cxReserva(d)) d.caixinhas.unshift(cxNova({ id: 'reserva', fixo: 'reserva', nome: 'RESERVA DE EMERGÊNCIA' }));
+  // o tipo de meta em R$ foi retirado: essas metas são apagadas (decisão da usuária)
+  var fica = (d.metas || []).filter(function (m) { return m.tipo === 'checklist'; });
+  d.metas = fica; d.cxV = 1; return d;
+}
+window.migrarCaixinha = migrarCaixinha;
 function migrarAcabados(d) {
   if (d.acabV >= 1) return d;
   d.acabados = d.acabados || [];
@@ -236,15 +250,15 @@ function migrarParcelas(d) {
 }
 window.migrarAcabados = migrarAcabados;
 function carregar() {
-  try { var s = window.localStorage.getItem(KEY); if (s) { var d = JSON.parse(s); if (d && d.gastos) { var antes = d.catV, ai = d.invImport, af = d.fatImport; migrarCategorias(d); var apv = d.parcV; migrarParcelas(d); if (apv !== d.parcV) salvarLS(d); importarListas(d); importarFaturas(d); var aa = d.acabV; migrarAcabados(d); if (antes !== d.catV || ai !== d.invImport || af !== d.fatImport || aa !== d.acabV) salvarLS(d); return { d: d, salvo: true }; } } } catch (e) {}
-  var n = seed(); n.gastos.forEach(function (g) { g.categoria = categorizar(g); }); return { d: n, salvo: null };
+  try { var s = window.localStorage.getItem(KEY); if (s) { var d = JSON.parse(s); if (d && d.gastos) { var antes = d.catV, ai = d.invImport, af = d.fatImport; migrarCategorias(d); var apv = d.parcV; migrarParcelas(d); if (apv !== d.parcV) salvarLS(d); importarListas(d); importarFaturas(d); var aa = d.acabV, ac = d.cxV; migrarAcabados(d); migrarCaixinha(d); if (antes !== d.catV || ai !== d.invImport || af !== d.fatImport || aa !== d.acabV || ac !== d.cxV) salvarLS(d); return { d: d, salvo: true }; } } } catch (e) {}
+  var n = seed(); n.gastos.forEach(function (g) { g.categoria = categorizar(g); }); migrarCaixinha(n); return { d: n, salvo: null };
 }
 function salvarLS(d) { try { window.localStorage.setItem(KEY, JSON.stringify(d)); return true; } catch (e) { return false; } }
 function ultimoMes(d) { var ms = d.gastos.filter(function (g) { return !g.previsto; }).map(function (g) { return g.mes; }).filter(Boolean).sort(); return ms.length ? ms[ms.length - 1] : hoje().slice(0, 7); }
 
 function fgVazio() { return { pago: false, editId: '', data: '', descricao: '', categoria: 'Outros', valor: '', coluna: 'demais', forma: '', cartao: '', parcelas: '1', parcelaAtual: '1', vencimento: '', obs: '', recorrente: false }; }
 function frVazio() { return { data: '', descricao: '', valor: '' }; }
-function fmVazio() { return { editId: '', tipo: 'valor', nome: '', objetivo: '', alcancado: '', prazo: '', prioridade: 'Média' }; }
+function fmVazio() { return { editId: '', tipo: 'checklist', nome: '', objetivo: '', alcancado: '', prazo: '', prioridade: 'Média' }; }
 function fsVazio() { return { metaId: '', nome: '', valor: '', prazo: '' }; }
 function fwVazio(cat) { return { editId: '', cat: cat || 'Skincare', nome: '', marca: '', validade: '', valor: '', prioridade: 'Média', link: '', obs: '' }; }
 function fiVazio() { return { novaCat: '', catAnterior: '', novoTipo: '', editId: '', validadeOrig: '', validadeTxt: '', tipo: '', nome: '', categoria: 'Skincare', marca: '', aquisicao: '', validade: '', quantidade: '1', valor: '', status: 'Fechado', obs: '' }; }
@@ -338,7 +352,7 @@ class Component extends DCLogic {
       showFi: false, fi: fiVazio(), iBusca: '', iCat: 'Todas', iMarca: 'Todas', iStatus: 'Todos', iTipo: 'Todos', iVal: 'todos',
       notif: '', tick: 0, showBackup: false, importTxt: '', importMsg: '', backupMsg: '',
       menu: telaEstreita() ? 'fechado' : lerPref('fin-menu', 'aberto'), tema: temaInicial(),
-      colAbertas: {}, invAbertas: {}, tiposAbertos: {}, acAbertos: {}, acabando: '', acabarSemData: false, metaAbertas: {}, histAbertos: {}, acabarData: '', showFa: false, fa: { nome: '', marca: '', validade: '', data: '' }, hDesc: '', hForma: 'Pix', cred: null, credFila: [], ia: iaVazio()
+      colAbertas: {}, invAbertas: {}, tiposAbertos: {}, acAbertos: {}, acabando: '', acabarSemData: false, metaAbertas: {}, histAbertos: {}, cxAbertas: {}, cxHist: {}, cxValor: {}, cxEtapa: {}, showFc: false, fc: { editId: '', nome: '', objetivo: '', prazo: '', inicial: '' }, acabarData: '', showFa: false, fa: { nome: '', marca: '', validade: '', data: '' }, hDesc: '', hForma: 'Pix', cred: null, credFila: [], ia: iaVazio()
     };
   })();
 
@@ -610,11 +624,40 @@ class Component extends DCLogic {
     if (l && l.length) return l;
     return d.habitos[iso] != null ? [{ id: 'antigo', valor: +d.habitos[iso] || 0, desc: '', forma: '' }] : [];
   }
+  salvarFc() {
+    var f = this.state.fc, ob = r2(num(f.objetivo));
+    if (!String(f.nome).trim()) { this.setState({ erro: 'Informe o nome do projeto.' }); return; }
+    if (!(ob > 0)) { this.setState({ erro: 'Informe o objetivo em R$.' }); return; }
+    var ini = r2(num(f.inicial));
+    this.upd(function (d) {
+      d.caixinhas = d.caixinhas || [];
+      if (f.editId) { var c = d.caixinhas.find(function (x) { return x.id === f.editId; }); if (c) { if (!c.fixo) c.nome = String(f.nome).trim(); c.objetivo = ob; c.prazo = f.prazo; } }
+      else d.caixinhas.push(cxNova({ nome: String(f.nome).trim(), objetivo: ob, prazo: f.prazo, movs: ini > 0 ? [{ id: uid(), data: hoje(), valor: ini, obs: 'Valor inicial' }] : [] }));
+    });
+    this.setState({ showFc: false, fc: { editId: '', nome: '', objetivo: '', prazo: '', inicial: '' }, erro: '' });
+  }
+  movCx(id, sinal) {
+    var v = r2(num(this.state.cxValor[id])); if (!(v > 0)) return;
+    var c0 = (this.state.d.caixinhas || []).find(function (x) { return x.id === id; });
+    if (sinal < 0 && c0 && v > cxGuardado(c0)) v = cxGuardado(c0);
+    if (!(v > 0)) return;
+    this.upd(function (d) { var c = (d.caixinhas || []).find(function (x) { return x.id === id; }); if (c) { c.movs = c.movs || []; c.movs.push({ id: uid(), data: hoje(), valor: sinal * v, obs: sinal > 0 ? 'Guardado' : 'Retirado' }); } });
+    var o = Object.assign({}, this.state.cxValor); o[id] = ''; this.setState({ cxValor: o });
+  }
+  addEtapaCx(id) {
+    var e = this.state.cxEtapa[id] || {}, v = r2(num(e.valor)); if (!String(e.nome || '').trim() || !(v > 0)) return;
+    this.upd(function (d) { var c = (d.caixinhas || []).find(function (x) { return x.id === id; }); if (c) { c.etapas = c.etapas || []; c.etapas.push({ id: uid(), nome: String(e.nome).trim(), valor: v }); } });
+    var o = Object.assign({}, this.state.cxEtapa); o[id] = { nome: '', valor: '' }; this.setState({ cxEtapa: o });
+  }
+  semGastoDia(iso) {
+    this.upd(function (x) { x.habDet = x.habDet || {}; x.habDet[iso] = [{ id: uid(), valor: 0, desc: 'Nenhum gasto neste dia', forma: '', zero: true }]; x.habitos[iso] = 0; });
+    this.setState({ hValor: '', hDesc: '' });
+  }
   addGastosDia(iso, novos) {
     var self = this;
     this.upd(function (x) {
       x.habDet = x.habDet || {};
-      var l = self.detDia(x, iso).map(function (e) { return e.id === 'antigo' ? Object.assign({}, e, { id: uid() }) : e; });
+      var l = self.detDia(x, iso).map(function (e) { return e.id === 'antigo' ? Object.assign({}, e, { id: uid() }) : e; }).filter(function (e) { return !e.zero; });
       novos.forEach(function (n) { l.push({ id: uid(), valor: r2(n.valor), desc: String(n.desc || '').trim(), forma: n.forma || '' }); });
       x.habDet[iso] = l; x.habitos[iso] = r2(l.reduce(function (a, e) { return a + (+e.valor || 0); }, 0));
     });
@@ -760,6 +803,7 @@ class Component extends DCLogic {
     this.setState({ novaWCat: '', wFiltro: n });
   }
   confirmarCompra() {
+    if (!reservaOk(this._d || this.state.d)) { this.setState({ cp: null }); return; }
     var c = this.state.cp; if (!c) return; var val = r2(num(c.valor));
     this.upd(function (d) {
       var w = d.wishlist.find(function (x) { return x.id === c.id; }); if (!w || w.status === 'Adquirido') return;
@@ -816,7 +860,7 @@ class Component extends DCLogic {
   renderVals() {
     var self = this, s = this.state, d = s.d, mes = s.mes, H = hoje();
     var meta = +d.settings.metaDiaria || 50;
-    var tabs = ['home', 'gastos', 'metas', 'habitos', 'wishlist', 'inventario', 'acabados'];
+    var tabs = ['home', 'gastos', 'metas', 'caixinha', 'habitos', 'wishlist', 'inventario', 'acabados'];
     var nb = {}, nf = {}, go = {};
     tabs.forEach(function (t) { nb[t] = s.tab === t ? '#1F4D3A' : 'transparent'; nf[t] = s.tab === t ? '#FFFFFE' : '#3D4440'; go[t] = self.irTab(t); });
 
@@ -1036,6 +1080,10 @@ class Component extends DCLogic {
         etapasTxt: subs.length ? subs.filter(function (x) { return x.status === 'Concluída'; }).length + ' de ' + subs.length + (subs.length === 1 ? ' subetapa cumprida' : ' subetapas cumpridas') : 'nenhuma subetapa'
       };
     });
+    metas.forEach(function (m, i) { m._i = i; });
+    metas.sort(function (a, b) { return ((a.status === 'Concluída') - (b.status === 'Concluída')) || (a._i - b._i); });
+    var nConc = metas.filter(function (m) { return m.status === 'Concluída'; }).length;
+    metas.forEach(function (m, i) { m.divisor = m.status === 'Concluída' && (i === 0 || metas[i - 1].status !== 'Concluída'); m.divisorTxt = nConc + (nConc === 1 ? ' meta concluída' : ' metas concluídas'); });
     proximas.sort(function (a, b) { return a.prazo.localeCompare(b.prazo); });
     proximas = proximas.slice(0, 4).map(function (x) { return { nome: x.nome, sub: x.sub, prazoTxt: dataBR(x.prazo), quando: quandoTxt(x.dd), cor: x.dd !== null && x.dd < 0 ? '#8C3B2E' : '#1F4D3A' }; });
     var metasPct = pcts.length ? pcts.reduce(function (a, b) { return a + b; }, 0) / pcts.length : 0;
@@ -1103,6 +1151,7 @@ class Component extends DCLogic {
     else { kMedia = brl(total / diasNoMes(mes)); kMediaSub = 'Gastos do mês ÷ ' + diasNoMes(mes) + ' dias'; }
 
     // ----- wishlist -----
+    var res = cxReserva(d), resOk = reservaOk(d), resG = res ? cxGuardado(res) : 0, resOb = res ? +res.objetivo || 0 : 0;
     var mesAtual = H.slice(0, 7);
     var wSaldo = r2(d.receitas.filter(function (r) { return r.mes === mesAtual; }).reduce(function (a, r) { return a + (+r.valor || 0); }, 0) - totalMes(d, mesAtual, virt));
     var wl = d.wishlist;
@@ -1127,8 +1176,9 @@ class Component extends DCLogic {
           return {
             nome: w.nome, detalhe: det.join(' · ') || '—', valorTxt: w.valor ? brl(w.valor) : 'Valor a preencher', prioridade: w.prioridade, pBg: pr[0], pFg: pr[1],
             adquirido: adq, desejado: !adq, risco: adq ? 'line-through' : 'none', temObs: !!w.obs, obs: w.obs,
+            podeComprar: !adq && resOk, travado: !adq && !resOk,
             temSaldo: !adq && +w.valor > 0, bg: (!adq && +w.valor > 0) ? (+w.valor <= wSaldo ? '#E8F1EA' : '#F8ECE8') : 'transparent',
-            sBg: +w.valor <= wSaldo ? '#D3E4D8' : '#F1D9D2', sFg: +w.valor <= wSaldo ? '#24533F' : '#8C3B2E', sTxt: +w.valor <= wSaldo ? 'Dá para comprar' : 'Sem saldo',
+            sBg: +w.valor <= wSaldo ? '#D3E4D8' : '#F1D9D2', sFg: +w.valor <= wSaldo ? '#24533F' : '#8C3B2E', sTxt: +w.valor <= wSaldo ? (resOk ? 'Dá para comprar' : 'Cabe no saldo') : 'Sem saldo',
             temLink: /^https?:\/\//i.test(w.link || ''), link: w.link,
             comprar: function () { self.setState({ cp: { id: w.id, nome: w.nome, valor: w.valor ? String(w.valor).replace('.', ',') : '', coluna: 'demais', registrar: true, data: hoje() } }); },
             edit: function () { self.setState({ showFw: true, erro: '', fw: { editId: w.id, cat: w.cat, nome: w.nome, marca: w.marca || '', validade: w.validade || '', valor: w.valor ? String(w.valor).replace('.', ',') : '', prioridade: w.prioridade || 'Média', link: w.link || '', obs: w.obs || '' } }); },
@@ -1208,6 +1258,49 @@ class Component extends DCLogic {
     }).filter(function (x) { return x.mostrar; });
     var cnt = function (k) { return somaUn(inv.filter(function (x) { return x.vi.k === k; }), function (x) { return x.pr; }); };
 
+    // ----- caixinha -----
+    var res = cxReserva(d), resOk = reservaOk(d);
+    var mediaGastos = (function () { var ms = Object.keys(meses).filter(function (m) { return m <= hoje().slice(0, 7); }).slice(-6); if (!ms.length) return 0; return r2(ms.reduce(function (a, m) { return a + totalMes(d, m, virt); }, 0) / ms.length); })();
+    var cxList = (d.caixinhas || []).slice().sort(function (a, b) { return (b.fixo === 'reserva') - (a.fixo === 'reserva'); });
+    var cxs = cxList.map(function (c) {
+      var g = cxGuardado(c), ob = +c.objetivo || 0, pc = pct(g, ob), concl = ob > 0 && g >= ob, key = 'cx:' + c.id;
+      var st = concl ? 'Concluído' : g > 0 ? 'Em andamento' : 'Não iniciado';
+      var stc = concl ? STAT['Concluída'] : g > 0 ? STAT['Em andamento'] : STAT['Não iniciada'];
+      var ets = (c.etapas || []).slice().sort(function (a, b) { return a.valor - b.valor; }), prev = 0;
+      var etapas = ets.map(function (e) {
+        var ok = g >= e.valor, sp = pct(Math.min(g, e.valor), e.valor), sst = ok ? 'Concluída' : g > prev ? 'Em andamento' : 'Não iniciada'; prev = e.valor;
+        var ke = 'cxe:' + e.id;
+        return { nome: e.nome, status: sst, stBg: STAT[sst][0], stFg: STAT[sst][1], w: sp + '%', cor: ok ? '#4F8A68' : '#7FAE8E', progTxt: brl(Math.min(g, e.valor)) + ' de ' + brl(e.valor), ok: ok,
+          del: self.confirmar(ke, function () { self.upd(function (x) { var cc = (x.caixinhas || []).find(function (y) { return y.id === c.id; }); if (cc) cc.etapas = (cc.etapas || []).filter(function (y) { return y.id !== e.id; }); }); }), delTxt: self.delTxt(ke) };
+      });
+      var nOk = etapas.filter(function (e) { return e.ok; }).length, etAb = !!s.cxAbertas[c.id], hiAb = !!s.cxHist[c.id];
+      var movs = (c.movs || []).slice().reverse().map(function (mv) { var km = 'cxm:' + mv.id;
+        return { dataTxt: mv.data ? dataBR(mv.data) : 'sem data', obs: mv.obs || (mv.valor >= 0 ? 'Guardado' : 'Retirado'), valorTxt: (mv.valor >= 0 ? '+ ' : '− ') + brl(Math.abs(mv.valor)), cor: mv.valor >= 0 ? '#2E6349' : '#8C3B2E',
+          del: self.confirmar(km, function () { self.upd(function (x) { var cc = (x.caixinhas || []).find(function (y) { return y.id === c.id; }); if (cc) cc.movs = (cc.movs || []).filter(function (y) { return y.id !== mv.id; }); }); }), delTxt: self.delTxt(km) }; });
+      var et = s.cxEtapa[c.id] || {}, sug = mediaGastos > 0 ? r2(mediaGastos * 6) : 0;
+      var setEt = function (f) { return function (e) { var o = Object.assign({}, self.state.cxEtapa); o[c.id] = Object.assign({}, o[c.id] || {}); o[c.id][f] = e.target.value; self.setState({ cxEtapa: o }); }; };
+      return { nome: c.nome, fixo: c.fixo === 'reserva', podeExcluir: c.fixo !== 'reserva', status: st, stBg: stc[0], stFg: stc[1],
+        borda: c.fixo === 'reserva' && !concl ? '#CDB591' : '#E6E8E3', icBg: c.fixo === 'reserva' ? '#1F4D3A' : '#E8F1EA', icFg: c.fixo === 'reserva' ? '#FFFFFE' : '#24533F',
+        prazoTxt: (c.prazo ? 'Prazo: ' + dataBR(c.prazo) + ' · ' + quandoTxt(diasAte(c.prazo)) : 'Sem prazo definido'),
+        semObjetivo: !(ob > 0), temObjetivo: ob > 0, temSugestao: sug > 0, sugestaoTxt: 'Usar 6 meses de gastos: ' + brl(sug),
+        usarSugestao: function () { self.upd(function (x) { var cc = (x.caixinhas || []).find(function (y) { return y.id === c.id; }); if (cc) cc.objetivo = sug; }); },
+        guardadoTxt: brl(g), objetivoTxt: brl(ob), pctTxt: pctTxt(pc) + ' guardado', w: pc + '%', cor: concl ? '#4F8A68' : '#7FAE8E',
+        faltaTxt: concl ? 'Objetivo atingido!' : 'Faltam ' + brl(r2(ob - g)),
+        marcos: ets.filter(function (e) { return ob > 0 && e.valor < ob; }).map(function (e) { return { left: pct(e.valor, ob) + '%', bg: g >= e.valor ? '#1F4D3A' : '#A3A9A4', nome: e.nome }; }),
+        valorMov: s.cxValor[c.id] || '', onValorMov: function (e) { var o = Object.assign({}, self.state.cxValor); o[c.id] = e.target.value; self.setState({ cxValor: o }); },
+        guardar: function () { self.movCx(c.id, 1); }, retirar: function () { self.movCx(c.id, -1); },
+        etAberto: etAb, ariaEt: etAb ? 'true' : 'false', rotEt: etAb ? '90deg' : '0deg', toggleEt: function () { var o = Object.assign({}, self.state.cxAbertas); o[c.id] = !etAb; self.setState({ cxAbertas: o }); },
+        etapas: etapas, semEtapas: !etapas.length, temEtapas: etapas.length > 0, etapasBar: etapas.map(function (e) { return { nome: e.nome + ' · ' + e.status, cor: e.ok ? '#1F4D3A' : '#E3E5E1' }; }),
+        etapasTxt: etapas.length ? nOk + ' de ' + etapas.length + (etapas.length === 1 ? ' etapa cumprida' : ' etapas cumpridas') : 'nenhuma etapa',
+        etNome: et.nome || '', etValor: et.valor || '', onEtNome: setEt('nome'), onEtValor: setEt('valor'), addEtapa: function () { self.addEtapaCx(c.id); },
+        histAberto: hiAb, ariaHist: hiAb ? 'true' : 'false', rotHist: hiAb ? '90deg' : '0deg', toggleHist: function () { var o = Object.assign({}, self.state.cxHist); o[c.id] = !hiAb; self.setState({ cxHist: o }); },
+        movs: movs, semMovs: !movs.length, movsTxt: movs.length + (movs.length === 1 ? ' registro' : ' registros'),
+        edit: function () { self.setState({ showFc: true, erro: '', fc: { editId: c.id, nome: c.nome, objetivo: ob ? String(ob).replace('.', ',') : '', prazo: c.prazo || '', inicial: '' } }); try { window.scrollTo(0, 0); } catch (e) {} },
+        del: self.confirmar(key, function () { self.upd(function (x) { x.caixinhas = (x.caixinhas || []).filter(function (y) { return y.id !== c.id; }); }); }), delTxt: self.delTxt(key) };
+    });
+    var cxTot = r2((d.caixinhas || []).reduce(function (a, c) { return a + cxGuardado(c); }, 0));
+    var resG = res ? cxGuardado(res) : 0, resOb = res ? +res.objetivo || 0 : 0;
+
     // ----- histórico do rastreador -----
     var DSEM = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
     var histDias = Object.keys(d.habitos).filter(function (k) { return /^\d{4}-\d{2}-\d{2}$/.test(k) && d.habitos[k] != null; }).sort().reverse();
@@ -1272,6 +1365,13 @@ class Component extends DCLogic {
       onMetaMensal: function (e) { var t = String(e.target.value).trim(), v = num(t); self.upd(function (x) { if (!t || !(v > 0)) delete x.settings.metaMensal; else x.settings.metaMensal = r2(v); }); },
       cronLibera: brl(cronLibera),
       wSaldoTxt: brl(wSaldo), wSaldoMes: mesNome(mesAtual), wSaldoCor: wSaldo < 0 ? '#8C3B2E' : '#24533F', wSaldoBg: wSaldo < 0 ? '#F8ECE8' : '#E8F1EA',
+      cxs: cxs, cxTotal: brl(cxTot), cxQtdTxt: cxs.length + (cxs.length === 1 ? ' projeto' : ' projetos'),
+      cxResPct: resOb > 0 ? pctTxt(pct(resG, resOb)) : '—', cxResSub: resOb > 0 ? brl(resG) + ' de ' + brl(resOb) : 'Defina o objetivo da reserva',
+      cxResBg: resOk ? '#E8F1EA' : '#F7F2E9', cxResCor: resOk ? '#2E6349' : '#6E5418',
+      cxWishTxt: resOk ? 'Liberadas' : 'Travadas', cxWishCor: resOk ? '#2E6349' : '#8C3B2E', cxWishSub: resOk ? 'A reserva atingiu o objetivo' : 'Até a reserva de emergência atingir o objetivo',
+      showFc: s.showFc, fc: s.fc, fcOn: this.binder('fc'), salvarFc: function () { self.salvarFc(); }, fcNovo: !s.fc.editId, fcNomeEditavel: !(s.fc.editId === 'reserva'),
+      fcTitulo: s.fc.editId ? 'Editar projeto' : 'Novo projeto',
+      abrirFc: function () { self.setState({ showFc: true, erro: '', fc: { editId: '', nome: '', objetivo: '', prazo: '', inicial: '' } }); }, fecharFc: function () { self.setState({ showFc: false, erro: '' }); },
       hist: hist, histVazio: hist.length === 0, histResumo: histDias.length ? histDias.length + (histDias.length === 1 ? ' dia registrado' : ' dias registrados') : '',
       showFa: s.showFa, fa: s.fa, faOn: this.binder('fa'), salvarFa: function () { self.salvarFa(); },
       abrirFa: function () { self.setState({ showFa: true, erro: '', fa: { nome: '', marca: '', validade: '', data: H } }); }, fecharFa: function () { self.setState({ showFa: false, erro: '' }); },
@@ -1307,7 +1407,7 @@ class Component extends DCLogic {
       }),
       iaSalvar: function () { self.iaSalvar(); }, iaSalvarTxt: { acab: 'Salvar em Acabados', inv: 'Salvar no inventário', wish: 'Salvar na wishlist', rast: 'Registrar no dia' }[s.ia.modo] || 'Lançar gastos', iaDescartar: function () { self.iaSet({ itens: [], erro: '' }); },
       iaFechar: function () { self.iaFechar(); }, iaAbrirGastos: function () { self.iaAbrir('gastos'); }, iaAbrirInv: function () { self.iaAbrir('inv'); },
-      tabHome: s.tab === 'home', tabGastos: s.tab === 'gastos', tabMetas: s.tab === 'metas', tabHab: s.tab === 'habitos', tabWish: s.tab === 'wishlist', tabInv: s.tab === 'inventario', tabAcab: s.tab === 'acabados',
+      tabHome: s.tab === 'home', tabGastos: s.tab === 'gastos', tabMetas: s.tab === 'metas', tabHab: s.tab === 'habitos', tabWish: s.tab === 'wishlist', tabInv: s.tab === 'inventario', tabAcab: s.tab === 'acabados', tabCx: s.tab === 'caixinha',
       showBackup: s.showBackup, backupTxt: s.showBackup ? JSON.stringify(d) : '',
       abrirBackup: function () { self.setState({ showBackup: true, importMsg: '', backupMsg: '' }); },
       fecharBackup: function () { self.setState({ showBackup: false, importTxt: '', importMsg: '' }); },
@@ -1323,7 +1423,7 @@ class Component extends DCLogic {
         var nd; try { nd = JSON.parse(String(self.state.importTxt || '').trim()); if (nd && nd.d && nd.d.gastos) nd = nd.d; } catch (x) { nd = null; }
         if (!nd || !Array.isArray(nd.gastos) || !Array.isArray(nd.inventario || [])) { self.setState({ importMsg: 'O texto colado não é um backup válido desta dashboard.', conf: '' }); return; }
         if (self.state.conf !== 'importar') { self.setState({ conf: 'importar', importMsg: 'Isso substitui todos os dados atuais. Toque de novo para confirmar.' }); return; }
-        try { migrarCategorias(nd); migrarParcelas(nd); importarListas(nd); importarFaturas(nd); migrarAcabados(nd); } catch (x) {}
+        try { migrarCategorias(nd); migrarParcelas(nd); importarListas(nd); importarFaturas(nd); migrarAcabados(nd); migrarCaixinha(nd); } catch (x) {}
         self.upd(function (x) { Object.keys(x).forEach(function (k) { delete x[k]; }); Object.assign(x, nd); });
         self.setState({ conf: '', importTxt: '', importMsg: 'Dados importados com sucesso.', mes: ultimoMes(nd) });
       },
@@ -1336,7 +1436,7 @@ class Component extends DCLogic {
       kTendTxt: ant > 0 ? (total <= ant ? '↓ ' : '↑ ') + pctTxt(Math.abs(total - ant) / ant * 100) + ' gastos vs ' + mesCurto(addMes(mes, -1)) : 'Sem mês anterior para comparar',
       kSaldoHeroCor: saldo < 0 ? 'rgba(255,196,180,1)' : 'rgba(255,255,255,1)',
       novoGastoHome: function () { self.setState({ tab: 'gastos', showFg: true, fg: fgVazio(), erro: '', colAbertas: {} }); try { window.scrollTo(0, 0); } catch (e) {} },
-      bc: { home: s.tab === 'home' ? 'ativo' : '', gastos: s.tab === 'gastos' ? 'ativo' : '', habitos: s.tab === 'habitos' ? 'ativo' : '', mais: ['metas', 'wishlist', 'inventario', 'acabados'].indexOf(s.tab) >= 0 ? 'ativo' : '' },
+      bc: { home: s.tab === 'home' ? 'ativo' : '', gastos: s.tab === 'gastos' ? 'ativo' : '', habitos: s.tab === 'habitos' ? 'ativo' : '', mais: ['metas', 'caixinha', 'wishlist', 'inventario', 'acabados'].indexOf(s.tab) >= 0 ? 'ativo' : '' },
       kReceita: brl(receita), kGastos: brl(total), kSaldo: brl(saldo), kSaldoCor: saldo < 0 ? '#8C3B2E' : '#24533F', kSaldoBg: saldo < 0 ? '#F8ECE8' : '#E8F1EA',
       kMedia: kMedia, kMediaSub: kMediaSub, kMeta: brl(meta), kMetasPct: pctTxt(metasPct), kMetasW: metasPct + '%',
       fr: s.fr, frOn: this.binder('fr'), salvarReceita: function () { self.salvarReceita(); },
@@ -1368,7 +1468,7 @@ class Component extends DCLogic {
       evol: evol, donut: donut, donutLeg: donutLeg, balanco: balanco, balTotal: brl(balSoma), balPct: pctTxt(pct(balSoma, total)), comp: comp, projBars: projBars,
 
       metas: metas, semMetas: metas.length === 0,
-      showFm: s.showFm, fm: s.fm, fmOn: this.binder('fm'), fmValor: s.fm.tipo !== 'checklist', fmTitulo: s.fm.editId ? 'Editar meta' : 'Nova meta',
+      showFm: s.showFm, fm: s.fm, fmOn: this.binder('fm'), fmValor: false, fmTitulo: s.fm.editId ? 'Editar meta' : 'Nova meta',
       abrirFm: function () { self.setState({ showFm: true, fm: fmVazio(), erro: '' }); }, fecharFm: function () { self.setState({ showFm: false, fm: fmVazio(), erro: '' }); },
       salvarMeta: function () { self.salvarMeta(); },
       fs: s.fs, fsOn: this.binder('fs'), salvarSub: function () { self.salvarSub(); }, fecharSub: function () { self.setState({ fs: fsVazio() }); },
@@ -1378,7 +1478,8 @@ class Component extends DCLogic {
       hSelTxt: 'Dia ' + dataBR(s.hSel), hValor: s.hValor, onHValor: this.setv('hValor'),
       salvarDia: function () { var v = r2(num(self.state.hValor)); if (!(v > 0)) return; self.addGastosDia(self.state.hSel, [{ valor: v, desc: self.state.hDesc, forma: self.state.hForma }]); self.setState({ hValor: '', hDesc: '', hForma: 'Pix' }); },
       hDesc: s.hDesc, onHDesc: this.setv('hDesc'), hForma: s.hForma, onHForma: this.setv('hForma'), formaROpts: FORMAS_R.map(function (f) { return { v: f }; }),
-      hDet: this.detDia(d, s.hSel).map(function (e) { return { desc: e.desc || (e.id === 'antigo' ? 'Registro do dia (sem detalhes)' : 'Sem descrição'), forma: e.forma, temForma: !!e.forma,
+      hPodeZero: !this.detDia(d, s.hSel).length && s.hSel <= H, semGastoDia: function () { self.semGastoDia(self.state.hSel); },
+      hDet: this.detDia(d, s.hSel).map(function (e) { return { zero: !!e.zero, desc: e.desc || (e.id === 'antigo' ? 'Registro do dia (sem detalhes)' : 'Sem descrição'), forma: e.forma, temForma: !!e.forma,
         formaBg: e.forma === 'Crédito' ? '#EFE6D6' : '#E8F1EA', formaFg: e.forma === 'Crédito' ? '#6B5432' : '#24533F', valorTxt: brl(e.valor), del: function () { self.removerGastoDia(self.state.hSel, e.id); } }; }),
       hSemDet: this.detDia(d, s.hSel).length === 0, hTotalDia: brl(d.habitos[s.hSel] || 0),
       iaAbrirRast: function () { self.iaAbrir('rast'); }, iaAbrirWish: function () { self.iaAbrir('wish'); },
@@ -1395,6 +1496,7 @@ class Component extends DCLogic {
       lembreteHora: d.settings.lembreteHora || '20:00', onLembrete: function (e) { var v = e.target.value; self.upd(function (x) { x.settings.lembreteHora = v; x.settings.ultimoAviso = ''; }); },
       ativarNotif: function () { self.ativarNotif(); }, notifTxt: notifTxt,
 
+      wTravada: !resOk, wTravaTxt: !resOb ? 'Defina o objetivo da reserva na aba Caixinha. Depois de atingido, os produtos ficam liberados.' : 'Guardado ' + brl(resG) + ' de ' + brl(resOb) + '. Faltam ' + brl(r2(resOb - resG)) + '.',
       wChips: wChips, wSecoes: wSecoes, wAltaQtd: String(alta.length), wAltaTxt: alta.length ? brl(alta.reduce(function (a, w) { return a + (+w.valor || 0); }, 0)) + ' estimado' : 'nenhum produto',
       showFw: s.showFw, fw: s.fw, fwOn: this.binder('fw'), fwTitulo: s.fw.editId ? 'Editar produto' : 'Novo produto na wishlist',
       abrirFw: function () { self.setState({ showFw: true, erro: '', fw: fwVazio(self.state.wFiltro !== 'Todas' ? self.state.wFiltro : d.wishCats[0]) }); },

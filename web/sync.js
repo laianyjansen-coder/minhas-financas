@@ -77,7 +77,7 @@
   // ---------- dados ----------
   function dadosAtuais() { return inst ? (inst._d || inst.state.d) : null; }
   function normalizar(d) {
-    ['migrarCategorias', 'migrarParcelas', 'importarListas', 'importarFaturas', 'migrarAcabados'].forEach(function (f) { try { if (typeof window[f] === 'function') window[f](d); } catch (e) {} });
+    ['migrarCategorias', 'migrarParcelas', 'importarListas', 'importarFaturas', 'migrarAcabados', 'migrarCaixinha'].forEach(function (f) { try { if (typeof window[f] === 'function') window[f](d); } catch (e) {} });
     return d;
   }
   function aplicarRemoto(d) {
